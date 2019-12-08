@@ -1,23 +1,20 @@
-// SPDX-License-Identifier: GPL-2.0
-/*
- * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
- */
-
 #include "allowedips.h"
 #include "peer.h"
 
-static void swap_endian(u8 *dst, const u8 *src, u8 bits)
+static void
+native_endian(uint8_t *dst, const uint8_t *src, uint8_t bits)
 {
 	if (bits == 32) {
-		*(u32 *)dst = be32_to_cpu(*(const __be32 *)src);
+		*(u32 *)dst = ntohl(*(const __be32 *)src);
 	} else if (bits == 128) {
 		((u64 *)dst)[0] = be64_to_cpu(((const __be64 *)src)[0]);
 		((u64 *)dst)[1] = be64_to_cpu(((const __be64 *)src)[1]);
 	}
 }
 
-static void copy_and_assign_cidr(struct allowedips_node *node, const u8 *src,
-				 u8 cidr, u8 bits)
+static void
+copy_and_assign_cidr(struct allowedips_node *node, const uint8_t *src,
+    uint8_t cidr, uint8_t bits)
 {
 	node->cidr = cidr;
 	node->bit_at_a = cidr / 8U;
@@ -130,8 +127,8 @@ static unsigned int fls128(u64 a, u64 b)
 	return a ? fls64(a) + 64U : fls64(b);
 }
 
-static u8 common_bits(const struct allowedips_node *node, const u8 *key,
-		      u8 bits)
+static uint8_t common_bits(const struct allowedips_node *node, const uint8_t *key,
+		      uint8_t bits)
 {
 	if (bits == 32)
 		return 32U - fls(*(const u32 *)node->bits ^ *(const u32 *)key);
@@ -142,8 +139,8 @@ static u8 common_bits(const struct allowedips_node *node, const u8 *key,
 	return 0;
 }
 
-static bool prefix_matches(const struct allowedips_node *node, const u8 *key,
-			   u8 bits)
+static bool prefix_matches(const struct allowedips_node *node, const uint8_t *key,
+			   uint8_t bits)
 {
 	/* This could be much faster if it actually just compared the common
 	 * bits properly, by precomputing a mask bswap(~0 << (32 - cidr)), and
@@ -154,8 +151,8 @@ static bool prefix_matches(const struct allowedips_node *node, const u8 *key,
 	return common_bits(node, key, bits) >= node->cidr;
 }
 
-static struct allowedips_node *find_node(struct allowedips_node *trie, u8 bits,
-					 const u8 *key)
+static struct allowedips_node *find_node(struct allowedips_node *trie, uint8_t bits,
+					 const uint8_t *key)
 {
 	struct allowedips_node *node = trie, *found = NULL;
 
@@ -170,11 +167,11 @@ static struct allowedips_node *find_node(struct allowedips_node *trie, u8 bits,
 }
 
 /* Returns a strong reference to a peer */
-static struct wg_peer *lookup(struct allowedips_node __rcu *root, u8 bits,
+static struct wg_peer *lookup(struct allowedips_node __rcu *root, uint8_t bits,
 			      const void *be_ip)
 {
 	/* Aligned so it can be passed to fls/fls64 */
-	u8 ip[16] __aligned(__alignof(u64));
+	uint8_t ip[16] __aligned(__alignof(u64));
 	struct allowedips_node *node;
 	struct wg_peer *peer = NULL;
 
@@ -192,8 +189,8 @@ retry:
 	return peer;
 }
 
-static bool node_placement(struct allowedips_node __rcu *trie, const u8 *key,
-			   u8 cidr, u8 bits, struct allowedips_node **rnode,
+static bool node_placement(struct allowedips_node __rcu *trie, const uint8_t *key,
+			   uint8_t cidr, uint8_t bits, struct allowedips_node **rnode,
 			   struct mutex *lock)
 {
 	struct allowedips_node *node = rcu_dereference_protected(trie,
@@ -214,8 +211,8 @@ static bool node_placement(struct allowedips_node __rcu *trie, const u8 *key,
 	return exact;
 }
 
-static int add(struct allowedips_node __rcu **trie, u8 bits, const u8 *key,
-	       u8 cidr, struct wg_peer *peer, struct mutex *lock)
+static int add(struct allowedips_node __rcu **trie, uint8_t bits, const uint8_t *key,
+	       uint8_t cidr, struct wg_peer *peer, struct mutex *lock)
 {
 	struct allowedips_node *node, *parent, *down, *newnode;
 
@@ -315,24 +312,24 @@ void wg_allowedips_free(struct allowedips *table, struct mutex *lock)
 }
 
 int wg_allowedips_insert_v4(struct allowedips *table, const struct in_addr *ip,
-			    u8 cidr, struct wg_peer *peer, struct mutex *lock)
+			    uint8_t cidr, struct wg_peer *peer, struct mutex *lock)
 {
 	/* Aligned so it can be passed to fls */
-	u8 key[4] __aligned(__alignof(u32));
+	uint8_t key[4] __aligned(__alignof(u32));
 
 	++table->seq;
-	swap_endian(key, (const u8 *)ip, 32);
+	swap_endian(key, (const uint8_t *)ip, 32);
 	return add(&table->root4, 32, key, cidr, peer, lock);
 }
 
 int wg_allowedips_insert_v6(struct allowedips *table, const struct in6_addr *ip,
-			    u8 cidr, struct wg_peer *peer, struct mutex *lock)
+			    uint8_t cidr, struct wg_peer *peer, struct mutex *lock)
 {
 	/* Aligned so it can be passed to fls64 */
-	u8 key[16] __aligned(__alignof(u64));
+	uint8_t key[16] __aligned(__alignof(u64));
 
 	++table->seq;
-	swap_endian(key, (const u8 *)ip, 128);
+	swap_endian(key, (const uint8_t *)ip, 128);
 	return add(&table->root6, 128, key, cidr, peer, lock);
 }
 
@@ -344,7 +341,7 @@ void wg_allowedips_remove_by_peer(struct allowedips *table,
 	walk_remove_by_peer(&table->root6, peer, lock);
 }
 
-int wg_allowedips_read_node(struct allowedips_node *node, u8 ip[16], u8 *cidr)
+int wg_allowedips_read_node(struct allowedips_node *node, uint8_t ip[16], uint8_t *cidr)
 {
 	const unsigned int cidr_bytes = DIV_ROUND_UP(node->cidr, 8U);
 	swap_endian(ip, node->bits, node->bitlen);

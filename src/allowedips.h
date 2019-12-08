@@ -13,8 +13,8 @@
 struct wg_peer;
 
 struct allowedips_node {
-	struct wg_peer __rcu *peer;
-	struct allowedips_node __rcu *bit[2];
+	struct wg_peer  *peer;
+	struct allowedips_node  *bit[2];
 	/* While it may seem scandalous that we waste space for v4,
 	 * we're alloc'ing to the nearest power of 2 anyway, so this
 	 * doesn't actually make a difference.
@@ -30,8 +30,8 @@ struct allowedips_node {
 };
 
 struct allowedips {
-	struct allowedips_node __rcu *root4;
-	struct allowedips_node __rcu *root6;
+	struct allowedips_node  *root4;
+	struct allowedips_node  *root6;
 	u64 seq;
 };
 
