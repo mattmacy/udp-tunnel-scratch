@@ -18,7 +18,8 @@
 #include <net/ip_tunnels.h>
 
 /* Must be called with bh disabled. */
-static void update_rx_stats(struct wg_peer *peer, size_t len)
+static void
+update_rx_stats(struct wg_peer *peer, size_t len)
 {
 	struct pcpu_sw_netstats *tstats =
 		get_cpu_ptr(peer->device->dev->tstats);
@@ -33,7 +34,8 @@ static void update_rx_stats(struct wg_peer *peer, size_t len)
 
 #define SKB_TYPE_LE32(skb) (((struct message_header *)(skb)->data)->type)
 
-static size_t validate_header_len(struct sk_buff *skb)
+static size_t
+validate_header_len(struct mbuf *skb)
 {
 	if (unlikely(skb->len < sizeof(struct message_header)))
 		return 0;
@@ -52,7 +54,8 @@ static size_t validate_header_len(struct sk_buff *skb)
 	return 0;
 }
 
-static int prepare_skb_header(struct sk_buff *skb, struct wg_device *wg)
+static int
+prepare_skb_header(struct mbuf *skb, struct wg_device *wg)
 {
 	size_t data_offset, data_len, header_len;
 	struct udphdr *udp;
@@ -63,7 +66,7 @@ static int prepare_skb_header(struct sk_buff *skb, struct wg_device *wg)
 			     skb_tail_pointer(skb)))
 		return -EINVAL; /* Bogus IP header */
 	udp = udp_hdr(skb);
-	data_offset = (u8 *)udp - skb->data;
+	data_offset = (uint8_t *)udp - skb->data;
 	if (unlikely(data_offset > U16_MAX ||
 		     data_offset + sizeof(struct udphdr) > skb->len))
 		/* Packet has offset at impossible location or isn't big enough
@@ -78,7 +81,7 @@ static int prepare_skb_header(struct sk_buff *skb, struct wg_device *wg)
 		 */
 		return -EINVAL;
 	data_len -= sizeof(struct udphdr);
-	data_offset = (u8 *)udp + sizeof(struct udphdr) - skb->data;
+	data_offset = (uint8_t *)udp + sizeof(struct udphdr) - skb->data;
 	if (unlikely(!pskb_may_pull(skb,
 				data_offset + sizeof(struct message_header)) ||
 		     pskb_trim(skb, data_len + data_offset) < 0))
@@ -97,15 +100,15 @@ static int prepare_skb_header(struct sk_buff *skb, struct wg_device *wg)
 	return 0;
 }
 
-static void wg_receive_handshake_packet(struct wg_device *wg,
-					struct sk_buff *skb)
+static void
+wg_receive_handshake_packet(struct wg_device *wg, struct mbuf *skb)
 {
 	enum cookie_mac_state mac_state;
 	struct wg_peer *peer = NULL;
 	/* This is global, so that our load calculation applies to the whole
 	 * system. We don't care about races with it at all.
 	 */
-	static u64 last_under_load;
+	static uint64_t last_under_load;
 	bool packet_needs_cookie;
 	bool under_load;
 
@@ -208,11 +211,12 @@ static void wg_receive_handshake_packet(struct wg_device *wg,
 	wg_peer_put(peer);
 }
 
-void wg_packet_handshake_receive_worker(struct work_struct *work)
+void
+wg_packet_handshake_receive_worker(struct work_struct *work)
 {
 	struct wg_device *wg = container_of(work, struct multicore_worker,
 					    work)->ptr;
-	struct sk_buff *skb;
+	struct mbuf *skb;
 
 	while ((skb = skb_dequeue(&wg->incoming_handshakes)) != NULL) {
 		wg_receive_handshake_packet(wg, skb);
@@ -221,7 +225,8 @@ void wg_packet_handshake_receive_worker(struct work_struct *work)
 	}
 }
 
-static void keep_key_fresh(struct wg_peer *peer)
+static void
+keep_key_fresh(struct wg_peer *peer)
 {
 	struct noise_keypair *keypair;
 	bool send = false;
@@ -244,11 +249,12 @@ static void keep_key_fresh(struct wg_peer *peer)
 	}
 }
 
-static bool decrypt_packet(struct sk_buff *skb, struct noise_symmetric_key *key,
-			   simd_context_t *simd_context)
+static bool
+decrypt_packet(struct mbuf *skb, struct noise_symmetric_key *key,
+    simd_context_t *simd_context)
 {
 	struct scatterlist sg[MAX_SKB_FRAGS + 8];
-	struct sk_buff *trailer;
+	struct mbuf *trailer;
 	unsigned int offset;
 	int num_frags;
 
@@ -298,7 +304,8 @@ static bool decrypt_packet(struct sk_buff *skb, struct noise_symmetric_key *key,
 }
 
 /* This is RFC6479, a replay detection bitmap algorithm that avoids bitshifts */
-static bool counter_validate(union noise_counter *counter, u64 their_counter)
+static bool
+counter_validate(union noise_counter *counter, uint64_t their_counter)
 {
 	unsigned long index, index_current, top, i;
 	bool ret = false;
@@ -338,9 +345,9 @@ out:
 
 #include "selftest/counter.c"
 
-static void wg_packet_consume_data_done(struct wg_peer *peer,
-					struct sk_buff *skb,
-					struct endpoint *endpoint)
+static void
+wg_packet_consume_data_done(struct wg_peer *peer,
+    struct mbuf *skb, struct endpoint *endpoint)
 {
 	struct net_device *dev = peer->device->dev;
 	unsigned int len, len_before_trim;
@@ -451,14 +458,15 @@ packet_processed:
 	dev_kfree_skb(skb);
 }
 
-int wg_packet_rx_poll(struct napi_struct *napi, int budget)
+int
+wg_packet_rx_poll(struct napi_struct *napi, int budget)
 {
 	struct wg_peer *peer = container_of(napi, struct wg_peer, napi);
 	struct crypt_queue *queue = &peer->rx_queue;
 	struct noise_keypair *keypair;
 	struct endpoint endpoint;
 	enum packet_state state;
-	struct sk_buff *skb;
+	struct mbuf *skb;
 	int work_done = 0;
 	bool free;
 
@@ -508,12 +516,13 @@ next:
 	return work_done;
 }
 
-void wg_packet_decrypt_worker(struct work_struct *work)
+void
+wg_packet_decrypt_worker(struct work_struct *work)
 {
 	struct crypt_queue *queue = container_of(work, struct multicore_worker,
 						 work)->ptr;
 	simd_context_t simd_context;
-	struct sk_buff *skb;
+	struct mbuf *skb;
 
 	simd_get(&simd_context);
 	while ((skb = ptr_ring_consume_bh(&queue->ring)) != NULL) {
@@ -528,7 +537,8 @@ void wg_packet_decrypt_worker(struct work_struct *work)
 	simd_put(&simd_context);
 }
 
-static void wg_packet_consume_data(struct wg_device *wg, struct sk_buff *skb)
+static void
+wg_packet_consume_data(struct wg_device *wg, struct mbuf *skb)
 {
 	__le32 idx = ((struct message_data *)skb->data)->key_idx;
 	struct wg_peer *peer = NULL;
@@ -563,7 +573,8 @@ err_keypair:
 	dev_kfree_skb(skb);
 }
 
-void wg_packet_receive(struct wg_device *wg, struct sk_buff *skb)
+void
+wg_packet_receive(struct wg_device *wg, struct mbuf *skb)
 {
 	if (unlikely(prepare_skb_header(skb, wg) < 0))
 		goto err;

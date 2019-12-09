@@ -1,8 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/*
- * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
- */
-
 #ifndef _WG_MESSAGES_H
 #define _WG_MESSAGES_H
 
@@ -17,7 +12,7 @@
 enum noise_lengths {
 	NOISE_PUBLIC_KEY_LEN = CURVE25519_KEY_SIZE,
 	NOISE_SYMMETRIC_KEY_LEN = CHACHA20POLY1305_KEY_SIZE,
-	NOISE_TIMESTAMP_LEN = sizeof(u64) + sizeof(u32),
+	NOISE_TIMESTAMP_LEN = sizeof(uint64_t) + sizeof(uint32_t),
 	NOISE_AUTHTAG_LEN = CHACHA20POLY1305_AUTHTAG_SIZE,
 	NOISE_HASH_LEN = BLAKE2S_HASH_SIZE
 };
@@ -39,7 +34,7 @@ enum counter_values {
 
 enum limits {
 	REKEY_AFTER_MESSAGES = 1ULL << 60,
-	REJECT_AFTER_MESSAGES = U64_MAX - COUNTER_WINDOW_SIZE - 1,
+	REJECT_AFTER_MESSAGES = UINT64_T_MAX - COUNTER_WINDOW_SIZE - 1,
 	REKEY_TIMEOUT = 5,
 	REKEY_TIMEOUT_JITTER_MAX_JIFFIES = HZ / 3,
 	REKEY_AFTER_TIME = 120,
@@ -63,8 +58,8 @@ enum message_type {
 
 struct message_header {
 	/* The actual layout of this that we want is:
-	 * u8 type
-	 * u8 reserved_zero[3]
+	 * uint8_t type
+	 * uint8_t reserved_zero[3]
 	 *
 	 * But it turns out that by encoding this as little endian,
 	 * we achieve the same thing, and it makes checking faster.
@@ -73,16 +68,16 @@ struct message_header {
 };
 
 struct message_macs {
-	u8 mac1[COOKIE_LEN];
-	u8 mac2[COOKIE_LEN];
+	uint8_t mac1[COOKIE_LEN];
+	uint8_t mac2[COOKIE_LEN];
 };
 
 struct message_handshake_initiation {
 	struct message_header header;
 	__le32 sender_index;
-	u8 unencrypted_ephemeral[NOISE_PUBLIC_KEY_LEN];
-	u8 encrypted_static[noise_encrypted_len(NOISE_PUBLIC_KEY_LEN)];
-	u8 encrypted_timestamp[noise_encrypted_len(NOISE_TIMESTAMP_LEN)];
+	uint8_t unencrypted_ephemeral[NOISE_PUBLIC_KEY_LEN];
+	uint8_t encrypted_static[noise_encrypted_len(NOISE_PUBLIC_KEY_LEN)];
+	uint8_t encrypted_timestamp[noise_encrypted_len(NOISE_TIMESTAMP_LEN)];
 	struct message_macs macs;
 };
 
@@ -90,23 +85,23 @@ struct message_handshake_response {
 	struct message_header header;
 	__le32 sender_index;
 	__le32 receiver_index;
-	u8 unencrypted_ephemeral[NOISE_PUBLIC_KEY_LEN];
-	u8 encrypted_nothing[noise_encrypted_len(0)];
+	uint8_t unencrypted_ephemeral[NOISE_PUBLIC_KEY_LEN];
+	uint8_t encrypted_nothing[noise_encrypted_len(0)];
 	struct message_macs macs;
 };
 
 struct message_handshake_cookie {
 	struct message_header header;
 	__le32 receiver_index;
-	u8 nonce[COOKIE_NONCE_LEN];
-	u8 encrypted_cookie[noise_encrypted_len(COOKIE_LEN)];
+	uint8_t nonce[COOKIE_NONCE_LEN];
+	uint8_t encrypted_cookie[noise_encrypted_len(COOKIE_LEN)];
 };
 
 struct message_data {
 	struct message_header header;
 	__le32 key_idx;
 	__le64 counter;
-	u8 encrypted_data[];
+	uint8_t encrypted_data[];
 };
 
 #define message_data_len(plain_len) \

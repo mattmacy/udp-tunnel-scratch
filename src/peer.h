@@ -48,7 +48,7 @@ struct wg_peer {
 	struct work_struct transmit_handshake_work, clear_peer_work;
 	struct cookie latest_cookie;
 	struct hlist_node pubkey_hash;
-	u64 rx_bytes, tx_bytes;
+	uint64_t rx_bytes, tx_bytes;
 	struct timer_list timer_retransmit_handshake, timer_send_keepalive;
 	struct timer_list timer_new_handshake, timer_zero_key_material;
 	struct timer_list timer_persistent_keepalive;
@@ -61,14 +61,14 @@ struct wg_peer {
 	struct rcu_head rcu;
 	struct list_head peer_list;
 	struct list_head allowedips_list;
-	u64 internal_id;
+	uint64_t internal_id;
 	struct napi_struct napi;
 	bool is_dead;
 };
 
 struct wg_peer *wg_peer_create(struct wg_device *wg,
-			       const u8 public_key[NOISE_PUBLIC_KEY_LEN],
-			       const u8 preshared_key[NOISE_SYMMETRIC_KEY_LEN]);
+			       const uint8_t public_key[NOISE_PUBLIC_KEY_LEN],
+			       const uint8_t preshared_key[NOISE_SYMMETRIC_KEY_LEN]);
 
 struct wg_peer *__must_check wg_peer_get_maybe_zero(struct wg_peer *peer);
 static inline struct wg_peer *wg_peer_get(struct wg_peer *peer)

@@ -7,8 +7,8 @@ native_endian(uint8_t *dst, const uint8_t *src, uint8_t bits)
 	if (bits == 32) {
 		*(u32 *)dst = ntohl(*(const __be32 *)src);
 	} else if (bits == 128) {
-		((u64 *)dst)[0] = be64_to_cpu(((const __be64 *)src)[0]);
-		((u64 *)dst)[1] = be64_to_cpu(((const __be64 *)src)[1]);
+		((uint64_t *)dst)[0] = be64_to_cpu(((const __be64 *)src)[0]);
+		((uint64_t *)dst)[1] = be64_to_cpu(((const __be64 *)src)[1]);
 	}
 }
 
@@ -128,7 +128,7 @@ walk_remove_by_peer(struct whitelist_node __rcu **top,
 }
 
 static unsigned int
-fls128(u64 a, u64 b)
+fls128(uint64_t a, uint64_t b)
 {
 	return a ? fls64(a) + 64U : fls64(b);
 }
@@ -141,8 +141,8 @@ common_bits(const struct whitelist_node *node, const uint8_t *key,
 		return 32U - fls(*(const u32 *)node->bits ^ *(const u32 *)key);
 	else if (bits == 128)
 		return 128U - fls128(
-			*(const u64 *)&node->bits[0] ^ *(const u64 *)&key[0],
-			*(const u64 *)&node->bits[8] ^ *(const u64 *)&key[8]);
+			*(const uint64_t *)&node->bits[0] ^ *(const uint64_t *)&key[0],
+			*(const uint64_t *)&node->bits[8] ^ *(const uint64_t *)&key[8]);
 	return 0;
 }
 
@@ -181,7 +181,7 @@ lookup(struct whitelist_node __rcu *root, uint8_t bits,
 			      const void *be_ip)
 {
 	/* Aligned so it can be passed to fls/fls64 */
-	uint8_t ip[16] __aligned(__alignof(u64));
+	uint8_t ip[16] __aligned(__alignof(uint64_t));
 	struct whitelist_node *node;
 	struct wg_peer *peer = NULL;
 
@@ -342,7 +342,7 @@ wg_whitelist_insert_v6(struct whitelist *table, const struct in6_addr *ip,
 			    uint8_t cidr, struct wg_peer *peer, struct mutex *lock)
 {
 	/* Aligned so it can be passed to fls64 */
-	uint8_t key[16] __aligned(__alignof(u64));
+	uint8_t key[16] __aligned(__alignof(uint64_t));
 
 	++table->seq;
 	swap_endian(key, (const uint8_t *)ip, 128);
@@ -374,7 +374,7 @@ wg_whitelist_read_node(struct whitelist_node *node, uint8_t ip[16], uint8_t *cid
 /* Returns a strong reference to a peer */
 struct wg_peer *
 wg_whitelist_lookup_dst(struct whitelist *table,
-					 struct sk_buff *skb)
+					 struct mbuf *skb)
 {
 	if (skb->protocol == htons(ETH_P_IP))
 		return lookup(table->root4, 32, &ip_hdr(skb)->daddr);
@@ -386,7 +386,7 @@ wg_whitelist_lookup_dst(struct whitelist *table,
 /* Returns a strong reference to a peer */
 struct wg_peer *
 wg_whitelist_lookup_src(struct whitelist *table,
-					 struct sk_buff *skb)
+					 struct mbuf *skb)
 {
 	if (skb->protocol == htons(ETH_P_IP))
 		return lookup(table->root4, 32, &ip_hdr(skb)->saddr);

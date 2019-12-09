@@ -22,8 +22,9 @@ wg_packet_percpu_multicore_worker_alloc(work_func_t function, void *ptr)
 	return worker;
 }
 
-int wg_packet_queue_init(struct crypt_queue *queue, work_func_t function,
-			 bool multicore, unsigned int len)
+int
+wg_packet_queue_init(struct crypt_queue *queue, work_func_t function,
+    bool multicore, unsigned int len)
 {
 	int ret;
 
@@ -44,7 +45,8 @@ int wg_packet_queue_init(struct crypt_queue *queue, work_func_t function,
 	return 0;
 }
 
-void wg_packet_queue_free(struct crypt_queue *queue, bool multicore)
+void
+wg_packet_queue_free(struct crypt_queue *queue, bool multicore)
 {
 	if (multicore)
 		free_percpu(queue->worker);

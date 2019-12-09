@@ -14,20 +14,19 @@
 
 struct wg_peer;
 
-struct pubkey_hashtable {
-	/* TODO: move to rhashtable */
+struct pubkey_table {
 	DECLARE_HASHTABLE(hashtable, 11);
 	siphash_key_t key;
 	struct mutex lock;
 };
 
-struct pubkey_hashtable *wg_pubkey_hashtable_alloc(void);
-void wg_pubkey_hashtable_add(struct pubkey_hashtable *table,
+struct pubkey_table *wg_pubkey_table_alloc(void);
+void wg_pubkey_table_add(struct pubkey_table *table,
 			     struct wg_peer *peer);
-void wg_pubkey_hashtable_remove(struct pubkey_hashtable *table,
+void wg_pubkey_table_remove(struct pubkey_table *table,
 				struct wg_peer *peer);
 struct wg_peer *
-wg_pubkey_hashtable_lookup(struct pubkey_hashtable *table,
+wg_pubkey_table_lookup(struct pubkey_table *table,
 			   const u8 pubkey[NOISE_PUBLIC_KEY_LEN]);
 
 struct index_hashtable {

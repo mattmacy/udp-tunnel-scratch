@@ -27,9 +27,9 @@
  * specified seconds.
  */
 
-static inline void mod_peer_timer(struct wg_peer *peer,
-				  struct timer_list *timer,
-				  unsigned long expires)
+static inline void
+mod_peer_timer(struct wg_peer *peer, struct timer_list *timer,
+    uint64_t expires)
 {
 	rcu_read_lock_bh();
 	if (likely(netif_running(peer->device->dev) &&
@@ -38,7 +38,8 @@ static inline void mod_peer_timer(struct wg_peer *peer,
 	rcu_read_unlock_bh();
 }
 
-static void wg_expired_retransmit_handshake(struct timer_list *timer)
+static void
+wg_expired_retransmit_handshake(struct timer_list *timer)
 {
 	struct wg_peer *peer = from_timer(peer, timer,
 					  timer_retransmit_handshake);
@@ -76,7 +77,8 @@ static void wg_expired_retransmit_handshake(struct timer_list *timer)
 	}
 }
 
-static void wg_expired_send_keepalive(struct timer_list *timer)
+static void
+wg_expired_send_keepalive(struct timer_list *timer)
 {
 	struct wg_peer *peer = from_timer(peer, timer, timer_send_keepalive);
 
@@ -88,7 +90,8 @@ static void wg_expired_send_keepalive(struct timer_list *timer)
 	}
 }
 
-static void wg_expired_new_handshake(struct timer_list *timer)
+static void
+wg_expired_new_handshake(struct timer_list *timer)
 {
 	struct wg_peer *peer = from_timer(peer, timer, timer_new_handshake);
 
@@ -102,7 +105,8 @@ static void wg_expired_new_handshake(struct timer_list *timer)
 	wg_packet_send_queued_handshake_initiation(peer, false);
 }
 
-static void wg_expired_zero_key_material(struct timer_list *timer)
+static void
+wg_expired_zero_key_material(struct timer_list *timer)
 {
 	struct wg_peer *peer = from_timer(peer, timer, timer_zero_key_material);
 
@@ -119,7 +123,8 @@ static void wg_expired_zero_key_material(struct timer_list *timer)
 	rcu_read_unlock_bh();
 }
 
-static void wg_queued_expired_zero_key_material(struct work_struct *work)
+static void
+wg_queued_expired_zero_key_material(struct work_struct *work)
 {
 	struct wg_peer *peer = container_of(work, struct wg_peer,
 					    clear_peer_work);
@@ -132,7 +137,8 @@ static void wg_queued_expired_zero_key_material(struct work_struct *work)
 	wg_peer_put(peer);
 }
 
-static void wg_expired_send_persistent_keepalive(struct timer_list *timer)
+static void
+wg_expired_send_persistent_keepalive(struct timer_list *timer)
 {
 	struct wg_peer *peer = from_timer(peer, timer,
 					  timer_persistent_keepalive);
@@ -142,7 +148,8 @@ static void wg_expired_send_persistent_keepalive(struct timer_list *timer)
 }
 
 /* Should be called after an authenticated data packet is sent. */
-void wg_timers_data_sent(struct wg_peer *peer)
+void
+wg_timers_data_sent(struct wg_peer *peer)
 {
 	if (!timer_pending(&peer->timer_new_handshake))
 		mod_peer_timer(peer, &peer->timer_new_handshake,
@@ -151,7 +158,8 @@ void wg_timers_data_sent(struct wg_peer *peer)
 }
 
 /* Should be called after an authenticated data packet is received. */
-void wg_timers_data_received(struct wg_peer *peer)
+void
+wg_timers_data_received(struct wg_peer *peer)
 {
 	if (likely(netif_running(peer->device->dev))) {
 		if (!timer_pending(&peer->timer_send_keepalive))
@@ -165,7 +173,8 @@ void wg_timers_data_received(struct wg_peer *peer)
 /* Should be called after any type of authenticated packet is sent, whether
  * keepalive, data, or handshake.
  */
-void wg_timers_any_authenticated_packet_sent(struct wg_peer *peer)
+void
+wg_timers_any_authenticated_packet_sent(struct wg_peer *peer)
 {
 	del_timer(&peer->timer_send_keepalive);
 }
@@ -173,13 +182,15 @@ void wg_timers_any_authenticated_packet_sent(struct wg_peer *peer)
 /* Should be called after any type of authenticated packet is received, whether
  * keepalive, data, or handshake.
  */
-void wg_timers_any_authenticated_packet_received(struct wg_peer *peer)
+void
+wg_timers_any_authenticated_packet_received(struct wg_peer *peer)
 {
 	del_timer(&peer->timer_new_handshake);
 }
 
 /* Should be called after a handshake initiation message is sent. */
-void wg_timers_handshake_initiated(struct wg_peer *peer)
+void
+wg_timers_handshake_initiated(struct wg_peer *peer)
 {
 	mod_peer_timer(peer, &peer->timer_retransmit_handshake,
 		       jiffies + REKEY_TIMEOUT * HZ +
@@ -189,7 +200,8 @@ void wg_timers_handshake_initiated(struct wg_peer *peer)
 /* Should be called after a handshake response message is received and processed
  * or when getting key confirmation via the first data message.
  */
-void wg_timers_handshake_complete(struct wg_peer *peer)
+void
+wg_timers_handshake_complete(struct wg_peer *peer)
 {
 	del_timer(&peer->timer_retransmit_handshake);
 	peer->timer_handshake_attempts = 0;
@@ -200,7 +212,8 @@ void wg_timers_handshake_complete(struct wg_peer *peer)
 /* Should be called after an ephemeral key is created, which is before sending a
  * handshake response or after receiving a handshake response.
  */
-void wg_timers_session_derived(struct wg_peer *peer)
+void
+wg_timers_session_derived(struct wg_peer *peer)
 {
 	mod_peer_timer(peer, &peer->timer_zero_key_material,
 		       jiffies + REJECT_AFTER_TIME * 3 * HZ);
@@ -209,14 +222,16 @@ void wg_timers_session_derived(struct wg_peer *peer)
 /* Should be called before a packet with authentication, whether
  * keepalive, data, or handshakem is sent, or after one is received.
  */
-void wg_timers_any_authenticated_packet_traversal(struct wg_peer *peer)
+void
+wg_timers_any_authenticated_packet_traversal(struct wg_peer *peer)
 {
 	if (peer->persistent_keepalive_interval)
 		mod_peer_timer(peer, &peer->timer_persistent_keepalive,
 			jiffies + peer->persistent_keepalive_interval * HZ);
 }
 
-void wg_timers_init(struct wg_peer *peer)
+void
+wg_timers_init(struct wg_peer *peer)
 {
 	timer_setup(&peer->timer_retransmit_handshake,
 		    wg_expired_retransmit_handshake, 0);
@@ -232,7 +247,8 @@ void wg_timers_init(struct wg_peer *peer)
 	peer->timer_need_another_keepalive = false;
 }
 
-void wg_timers_stop(struct wg_peer *peer)
+void
+wg_timers_stop(struct wg_peer *peer)
 {
 	del_timer_sync(&peer->timer_retransmit_handshake);
 	del_timer_sync(&peer->timer_send_keepalive);

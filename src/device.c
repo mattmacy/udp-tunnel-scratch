@@ -26,6 +26,7 @@
 
 static LIST_HEAD(device_list);
 
+#if 0
 static int wg_open(struct net_device *dev)
 {
 	struct in_device *dev_v4 = __in_dev_get_rtnl(dev);
@@ -65,43 +66,10 @@ static int wg_open(struct net_device *dev)
 	mutex_unlock(&wg->device_update_lock);
 	return 0;
 }
-
-#ifdef CONFIG_PM_SLEEP
-static int wg_pm_notification(struct notifier_block *nb, unsigned long action,
-			      void *data)
-{
-	struct wg_device *wg;
-	struct wg_peer *peer;
-
-	/* If the machine is constantly suspending and resuming, as part of
-	 * its normal operation rather than as a somewhat rare event, then we
-	 * don't actually want to clear keys.
-	 */
-	if (IS_ENABLED(CONFIG_PM_AUTOSLEEP) || IS_ENABLED(CONFIG_ANDROID))
-		return 0;
-
-	if (action != PM_HIBERNATION_PREPARE && action != PM_SUSPEND_PREPARE)
-		return 0;
-
-	rtnl_lock();
-	list_for_each_entry(wg, &device_list, device_list) {
-		mutex_lock(&wg->device_update_lock);
-		list_for_each_entry(peer, &wg->peer_list, peer_list) {
-			del_timer(&peer->timer_zero_key_material);
-			wg_noise_handshake_clear(&peer->handshake);
-			wg_noise_keypairs_clear(&peer->keypairs);
-		}
-		mutex_unlock(&wg->device_update_lock);
-	}
-	rtnl_unlock();
-	rcu_barrier();
-	return 0;
-}
-
-static struct notifier_block pm_notifier = { .notifier_call = wg_pm_notification };
 #endif
 
-static int wg_stop(struct net_device *dev)
+static int
+wg_stop(struct net_device *dev)
 {
 	struct wg_device *wg = netdev_priv(dev);
 	struct wg_peer *peer;
@@ -120,12 +88,14 @@ static int wg_stop(struct net_device *dev)
 	return 0;
 }
 
-static netdev_tx_t wg_xmit(struct sk_buff *skb, struct net_device *dev)
+static netdev_tx_t
+wg_xmit(struct mbuf *skb, struct net_device *dev)
+
 {
 	struct wg_device *wg = netdev_priv(dev);
-	struct sk_buff_head packets;
+	struct mbuf_head packets;
 	struct wg_peer *peer;
-	struct sk_buff *next;
+	struct mbuf *next;
 	sa_family_t family;
 	u32 mtu;
 	int ret;
@@ -136,7 +106,7 @@ static netdev_tx_t wg_xmit(struct sk_buff *skb, struct net_device *dev)
 		goto err;
 	}
 
-	peer = wg_allowedips_lookup_dst(&wg->peer_allowedips, skb);
+	peer = wg_whitelist_lookup_dst(&wg->peer_whitelist, skb);
 	if (unlikely(!peer)) {
 		ret = -ENOKEY;
 		if (skb->protocol == htons(ETH_P_IP))
@@ -162,7 +132,7 @@ static netdev_tx_t wg_xmit(struct sk_buff *skb, struct net_device *dev)
 	if (!skb_is_gso(skb)) {
 		skb_mark_not_on_list(skb);
 	} else {
-		struct sk_buff *segs = skb_gso_segment(skb, 0);
+		struct mbuf *segs = skb_gso_segment(skb, 0);
 
 		if (unlikely(IS_ERR(segs))) {
 			ret = PTR_ERR(segs);
@@ -225,7 +195,8 @@ static const struct net_device_ops netdev_ops = {
 	.ndo_get_stats64	= ip_tunnel_get_stats64
 };
 
-static void wg_destruct(struct net_device *dev)
+static void
+wg_destruct(struct net_device *dev)
 {
 	struct wg_device *wg = netdev_priv(dev);
 
@@ -260,7 +231,8 @@ static void wg_destruct(struct net_device *dev)
 
 static const struct device_type device_type = { .name = KBUILD_MODNAME };
 
-static void wg_setup(struct net_device *dev)
+static void
+wg_setup(struct net_device *dev)
 {
 	struct wg_device *wg = netdev_priv(dev);
 	enum { WG_NETDEV_FEATURES = NETIF_F_HW_CSUM | NETIF_F_RXCSUM |
@@ -296,7 +268,8 @@ static void wg_setup(struct net_device *dev)
 	wg->dev = dev;
 }
 
-static int wg_newlink(struct net *src_net, struct net_device *dev,
+static int
+wg_newlink(struct net *src_net, struct net_device *dev,
 		      struct nlattr *tb[], struct nlattr *data[],
 		      struct netlink_ext_ack *extack)
 {
@@ -308,7 +281,7 @@ static int wg_newlink(struct net *src_net, struct net_device *dev,
 	mutex_init(&wg->socket_update_lock);
 	mutex_init(&wg->device_update_lock);
 	skb_queue_head_init(&wg->incoming_handshakes);
-	wg_allowedips_init(&wg->peer_allowedips);
+	wg_whitelists_init(&wg->peer_whitelist);
 	wg_cookie_checker_init(&wg->cookie_checker, wg);
 	INIT_LIST_HEAD(&wg->peer_list);
 	wg->device_update_gen = 1;
@@ -397,6 +370,7 @@ err_free_peer_hashtable:
 	return ret;
 }
 
+#if 0
 static struct rtnl_link_ops link_ops __read_mostly = {
 	.kind			= KBUILD_MODNAME,
 	.priv_size		= sizeof(struct wg_device),
@@ -404,7 +378,8 @@ static struct rtnl_link_ops link_ops __read_mostly = {
 	.newlink		= wg_newlink,
 };
 
-static int wg_netdevice_notification(struct notifier_block *nb,
+static int
+wg_netdevice_notification(struct notifier_block *nb,
 				     unsigned long action, void *data)
 {
 	struct net_device *dev = ((struct netdev_notifier_info *)data)->dev;
@@ -434,12 +409,6 @@ int __init wg_device_init(void)
 {
 	int ret;
 
-#ifdef CONFIG_PM_SLEEP
-	ret = register_pm_notifier(&pm_notifier);
-	if (ret)
-		return ret;
-#endif
-
 	ret = register_netdevice_notifier(&netdevice_notifier);
 	if (ret)
 		goto error_pm;
@@ -453,9 +422,6 @@ int __init wg_device_init(void)
 error_netdevice:
 	unregister_netdevice_notifier(&netdevice_notifier);
 error_pm:
-#ifdef CONFIG_PM_SLEEP
-	unregister_pm_notifier(&pm_notifier);
-#endif
 	return ret;
 }
 
@@ -463,8 +429,6 @@ void wg_device_uninit(void)
 {
 	rtnl_link_unregister(&link_ops);
 	unregister_netdevice_notifier(&netdevice_notifier);
-#ifdef CONFIG_PM_SLEEP
-	unregister_pm_notifier(&pm_notifier);
-#endif
 	rcu_barrier();
 }
+#endif

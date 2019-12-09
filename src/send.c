@@ -19,7 +19,8 @@
 #include <net/udp.h>
 #include <net/sock.h>
 
-static void wg_packet_send_handshake_initiation(struct wg_peer *peer)
+static void
+wg_packet_send_handshake_initiation(struct wg_peer *peer)
 {
 	struct message_handshake_initiation packet;
 
@@ -44,7 +45,8 @@ static void wg_packet_send_handshake_initiation(struct wg_peer *peer)
 	}
 }
 
-void wg_packet_handshake_send_worker(struct work_struct *work)
+void
+wg_packet_handshake_send_worker(struct work_struct *work)
 {
 	struct wg_peer *peer = container_of(work, struct wg_peer,
 					    transmit_handshake_work);
@@ -53,8 +55,9 @@ void wg_packet_handshake_send_worker(struct work_struct *work)
 	wg_peer_put(peer);
 }
 
-void wg_packet_send_queued_handshake_initiation(struct wg_peer *peer,
-						bool is_retry)
+void
+wg_packet_send_queued_handshake_initiation(struct wg_peer *peer,
+    bool is_retry)
 {
 	if (!is_retry)
 		peer->timer_handshake_attempts = 0;
@@ -83,7 +86,8 @@ out:
 	rcu_read_unlock_bh();
 }
 
-void wg_packet_send_handshake_response(struct wg_peer *peer)
+void
+wg_packet_send_handshake_response(struct wg_peer *peer)
 {
 	struct message_handshake_response packet;
 
@@ -108,9 +112,9 @@ void wg_packet_send_handshake_response(struct wg_peer *peer)
 	}
 }
 
-void wg_packet_send_handshake_cookie(struct wg_device *wg,
-				     struct sk_buff *initiating_skb,
-				     __le32 sender_index)
+void
+wg_packet_send_handshake_cookie(struct wg_device *wg,
+    struct mbuf *initiating_skb, __le32 sender_index)
 {
 	struct message_handshake_cookie packet;
 
@@ -122,7 +126,8 @@ void wg_packet_send_handshake_cookie(struct wg_device *wg,
 					      sizeof(packet));
 }
 
-static void keep_key_fresh(struct wg_peer *peer)
+static void
+keep_key_fresh(struct wg_peer *peer)
 {
 	struct noise_keypair *keypair;
 	bool send = false;
@@ -142,7 +147,8 @@ static void keep_key_fresh(struct wg_peer *peer)
 		wg_packet_send_queued_handshake_initiation(peer, false);
 }
 
-static unsigned int calculate_skb_padding(struct sk_buff *skb)
+static unsigned int
+calculate_skb_padding(struct mbuf *skb)
 {
 	/* We do this modulo business with the MTU, just in case the networking
 	 * layer gives us a packet that's bigger than the MTU. In that case, we
@@ -157,13 +163,14 @@ static unsigned int calculate_skb_padding(struct sk_buff *skb)
 	return padded_size - last_unit;
 }
 
-static bool encrypt_packet(struct sk_buff *skb, struct noise_keypair *keypair,
-			   simd_context_t *simd_context)
+static bool
+encrypt_packet(struct mbuf *skb, struct noise_keypair *keypair,
+    simd_context_t *simd_context)
 {
 	unsigned int padding_len, plaintext_len, trailer_len;
 	struct scatterlist sg[MAX_SKB_FRAGS + 8];
 	struct message_data *header;
-	struct sk_buff *trailer;
+	struct mbuf *trailer;
 	int num_frags;
 
 	/* Calculate lengths. */
@@ -213,9 +220,10 @@ static bool encrypt_packet(struct sk_buff *skb, struct noise_keypair *keypair,
 						   simd_context);
 }
 
-void wg_packet_send_keepalive(struct wg_peer *peer)
+void
+wg_packet_send_keepalive(struct wg_peer *peer)
 {
-	struct sk_buff *skb;
+	struct mbuf *skb;
 
 	if (skb_queue_empty(&peer->staged_packet_queue)) {
 		skb = alloc_skb(DATA_PACKET_HEAD_ROOM + MESSAGE_MINIMUM_LENGTH,
@@ -234,10 +242,10 @@ void wg_packet_send_keepalive(struct wg_peer *peer)
 	wg_packet_send_staged_packets(peer);
 }
 
-static void wg_packet_create_data_done(struct sk_buff *first,
-				       struct wg_peer *peer)
+static void
+wg_packet_create_data_done(struct mbuf *first, struct wg_peer *peer)
 {
-	struct sk_buff *skb, *next;
+	struct mbuf *skb, *next;
 	bool is_keepalive, data_sent = false;
 
 	wg_timers_any_authenticated_packet_traversal(peer);
@@ -255,13 +263,14 @@ static void wg_packet_create_data_done(struct sk_buff *first,
 	keep_key_fresh(peer);
 }
 
-void wg_packet_tx_worker(struct work_struct *work)
+void
+wg_packet_tx_worker(struct work_struct *work)
 {
 	struct crypt_queue *queue = container_of(work, struct crypt_queue,
 						 work);
 	struct noise_keypair *keypair;
 	enum packet_state state;
-	struct sk_buff *first;
+	struct mbuf *first;
 	struct wg_peer *peer;
 
 	while ((first = __ptr_ring_peek(&queue->ring)) != NULL &&
@@ -281,11 +290,12 @@ void wg_packet_tx_worker(struct work_struct *work)
 	}
 }
 
-void wg_packet_encrypt_worker(struct work_struct *work)
+void
+wg_packet_encrypt_worker(struct work_struct *work)
 {
 	struct crypt_queue *queue = container_of(work, struct multicore_worker,
 						 work)->ptr;
-	struct sk_buff *first, *skb, *next;
+	struct mbuf *first, *skb, *next;
 	simd_context_t simd_context;
 
 	simd_get(&simd_context);
@@ -310,7 +320,8 @@ void wg_packet_encrypt_worker(struct work_struct *work)
 	simd_put(&simd_context);
 }
 
-static void wg_packet_create_data(struct sk_buff *first)
+static void
+wg_packet_create_data(struct mbuf *first)
 {
 	struct wg_peer *peer = PACKET_PEER(first);
 	struct wg_device *wg = peer->device;
@@ -336,7 +347,8 @@ err:
 	kfree_skb_list(first);
 }
 
-void wg_packet_purge_staged_packets(struct wg_peer *peer)
+void
+wg_packet_purge_staged_packets(struct wg_peer *peer)
 {
 	spin_lock_bh(&peer->staged_packet_queue.lock);
 	peer->device->dev->stats.tx_dropped += peer->staged_packet_queue.qlen;
@@ -344,12 +356,13 @@ void wg_packet_purge_staged_packets(struct wg_peer *peer)
 	spin_unlock_bh(&peer->staged_packet_queue.lock);
 }
 
-void wg_packet_send_staged_packets(struct wg_peer *peer)
+void
+wg_packet_send_staged_packets(struct wg_peer *peer)
 {
 	struct noise_symmetric_key *key;
 	struct noise_keypair *keypair;
-	struct sk_buff_head packets;
-	struct sk_buff *skb;
+	struct mbuf_head packets;
+	struct mbuf *skb;
 
 	/* Steal the current queue into our local one. */
 	__skb_queue_head_init(&packets);

@@ -17,8 +17,9 @@
 #include <net/udp_tunnel.h>
 #include <net/ipv6.h>
 
-static int send4(struct wg_device *wg, struct sk_buff *skb,
-		 struct endpoint *endpoint, u8 ds, struct dst_cache *cache)
+static int
+send4(struct wg_device *wg, struct mbuf *skb,
+    struct endpoint *endpoint, uint8_t ds, struct dst_cache *cache)
 {
 	struct flowi4 fl = {
 		.saddr = endpoint->src4.s_addr,
@@ -100,8 +101,9 @@ out:
 	return ret;
 }
 
-static int send6(struct wg_device *wg, struct sk_buff *skb,
-		 struct endpoint *endpoint, u8 ds, struct dst_cache *cache)
+static int
+send6(struct wg_device *wg, struct mbuf *skb,
+    struct endpoint *endpoint, uint8_t ds, struct dst_cache *cache)
 {
 #if IS_ENABLED(CONFIG_IPV6)
 	struct flowi6 fl = {
@@ -176,7 +178,8 @@ out:
 #endif
 }
 
-int wg_socket_send_skb_to_peer(struct wg_peer *peer, struct sk_buff *skb, u8 ds)
+int
+wg_socket_send_skb_to_peer(struct wg_peer *peer, struct mbuf *skb, uint8_t ds)
 {
 	size_t skb_len = skb->len;
 	int ret = -EAFNOSUPPORT;
@@ -197,10 +200,11 @@ int wg_socket_send_skb_to_peer(struct wg_peer *peer, struct sk_buff *skb, u8 ds)
 	return ret;
 }
 
-int wg_socket_send_buffer_to_peer(struct wg_peer *peer, void *buffer,
-				  size_t len, u8 ds)
+int
+wg_socket_send_buffer_to_peer(struct wg_peer *peer, void *buffer,
+    size_t len, uint8_t ds)
 {
-	struct sk_buff *skb = alloc_skb(len + SKB_HEADER_LEN, GFP_ATOMIC);
+	struct mbuf *skb = alloc_skb(len + SKB_HEADER_LEN, GFP_ATOMIC);
 
 	if (unlikely(!skb))
 		return -ENOMEM;
@@ -211,12 +215,12 @@ int wg_socket_send_buffer_to_peer(struct wg_peer *peer, void *buffer,
 	return wg_socket_send_skb_to_peer(peer, skb, ds);
 }
 
-int wg_socket_send_buffer_as_reply_to_skb(struct wg_device *wg,
-					  struct sk_buff *in_skb, void *buffer,
-					  size_t len)
+int
+wg_socket_send_buffer_as_reply_to_skb(struct wg_device *wg,
+    struct mbuf *in_skb, void *buffer, size_t len)
 {
 	int ret = 0;
-	struct sk_buff *skb;
+	struct mbuf *skb;
 	struct endpoint endpoint;
 
 	if (unlikely(!in_skb))
@@ -243,8 +247,9 @@ int wg_socket_send_buffer_as_reply_to_skb(struct wg_device *wg,
 	return ret;
 }
 
-int wg_socket_endpoint_from_skb(struct endpoint *endpoint,
-				const struct sk_buff *skb)
+int
+wg_socket_endpoint_from_skb(struct endpoint *endpoint,
+    const struct mbuf *skb)
 {
 	memset(endpoint, 0, sizeof(*endpoint));
 	if (skb->protocol == htons(ETH_P_IP)) {
@@ -266,7 +271,8 @@ int wg_socket_endpoint_from_skb(struct endpoint *endpoint,
 	return 0;
 }
 
-static bool endpoint_eq(const struct endpoint *a, const struct endpoint *b)
+static bool
+endpoint_eq(const struct endpoint *a, const struct endpoint *b)
 {
 	return (a->addr.sa_family == AF_INET && b->addr.sa_family == AF_INET &&
 		a->addr4.sin_port == b->addr4.sin_port &&
@@ -281,8 +287,9 @@ static bool endpoint_eq(const struct endpoint *a, const struct endpoint *b)
 	       unlikely(!a->addr.sa_family && !b->addr.sa_family);
 }
 
-void wg_socket_set_peer_endpoint(struct wg_peer *peer,
-				 const struct endpoint *endpoint)
+void
+wg_socket_set_peer_endpoint(struct wg_peer *peer,
+    const struct endpoint *endpoint)
 {
 	/* First we check unlocked, in order to optimize, since it's pretty rare
 	 * that an endpoint will change. If we happen to be mid-write, and two
@@ -307,8 +314,9 @@ out:
 	write_unlock_bh(&peer->endpoint_lock);
 }
 
-void wg_socket_set_peer_endpoint_from_skb(struct wg_peer *peer,
-					  const struct sk_buff *skb)
+void
+wg_socket_set_peer_endpoint_from_skb(struct wg_peer *peer,
+					  const struct mbuf *skb)
 {
 	struct endpoint endpoint;
 
@@ -316,7 +324,8 @@ void wg_socket_set_peer_endpoint_from_skb(struct wg_peer *peer,
 		wg_socket_set_peer_endpoint(peer, &endpoint);
 }
 
-void wg_socket_clear_peer_endpoint_src(struct wg_peer *peer)
+void
+wg_socket_clear_peer_endpoint_src(struct wg_peer *peer)
 {
 	write_lock_bh(&peer->endpoint_lock);
 	memset(&peer->endpoint.src6, 0, sizeof(peer->endpoint.src6));
@@ -324,7 +333,8 @@ void wg_socket_clear_peer_endpoint_src(struct wg_peer *peer)
 	write_unlock_bh(&peer->endpoint_lock);
 }
 
-static int wg_receive(struct sock *sk, struct sk_buff *skb)
+static int
+wg_receive(struct sock *sk, struct mbuf *skb)
 {
 	struct wg_device *wg;
 
@@ -341,7 +351,8 @@ err:
 	return 0;
 }
 
-static void sock_free(struct sock *sock)
+static void
+sock_free(struct sock *sock)
 {
 	if (unlikely(!sock))
 		return;
@@ -349,14 +360,16 @@ static void sock_free(struct sock *sock)
 	udp_tunnel_sock_release(sock->sk_socket);
 }
 
-static void set_sock_opts(struct socket *sock)
+static void
+set_sock_opts(struct socket *sock)
 {
 	sock->sk->sk_allocation = GFP_ATOMIC;
 	sock->sk->sk_sndbuf = INT_MAX;
 	sk_set_memalloc(sock->sk);
 }
 
-int wg_socket_init(struct wg_device *wg, u16 port)
+int
+wg_socket_init(struct wg_device *wg, uint16_t port)
 {
 	int ret;
 	struct udp_tunnel_sock_cfg cfg = {
@@ -415,7 +428,8 @@ retry:
 	return 0;
 }
 
-void wg_socket_reinit(struct wg_device *wg, struct sock *new4,
+void
+wg_socket_reinit(struct wg_device *wg, struct sock *new4,
 		      struct sock *new6)
 {
 	struct sock *old4, *old6;

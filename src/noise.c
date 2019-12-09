@@ -25,10 +25,10 @@
  * <- e, ee, se, psk, {}
  */
 
-static const u8 handshake_name[37] = "Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s";
-static const u8 identifier_name[34] = "WireGuard v1 zx2c4 Jason@zx2c4.com";
-static u8 handshake_init_hash[NOISE_HASH_LEN] __ro_after_init;
-static u8 handshake_init_chaining_key[NOISE_HASH_LEN] __ro_after_init;
+static const uint8_t handshake_name[37] = "Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s";
+static const uint8_t identifier_name[34] = "WireGuard v1 zx2c4 Jason@zx2c4.com";
+static uint8_t handshake_init_hash[NOISE_HASH_LEN] __ro_after_init;
+static uint8_t handshake_init_chaining_key[NOISE_HASH_LEN] __ro_after_init;
 static atomic64_t keypair_counter = ATOMIC64_INIT(0);
 
 void __init wg_noise_init(void)
@@ -63,8 +63,8 @@ bool wg_noise_precompute_static_static(struct wg_peer *peer)
 
 bool wg_noise_handshake_init(struct noise_handshake *handshake,
 			   struct noise_static_identity *static_identity,
-			   const u8 peer_public_key[NOISE_PUBLIC_KEY_LEN],
-			   const u8 peer_preshared_key[NOISE_SYMMETRIC_KEY_LEN],
+			   const uint8_t peer_public_key[NOISE_PUBLIC_KEY_LEN],
+			   const uint8_t peer_preshared_key[NOISE_SYMMETRIC_KEY_LEN],
 			   struct wg_peer *peer)
 {
 	memset(handshake, 0, sizeof(*handshake));
@@ -300,7 +300,7 @@ bool wg_noise_received_with_keypair(struct noise_keypairs *keypairs,
 /* Must hold static_identity->lock */
 void wg_noise_set_static_identity_private_key(
 	struct noise_static_identity *static_identity,
-	const u8 private_key[NOISE_PUBLIC_KEY_LEN])
+	const uint8_t private_key[NOISE_PUBLIC_KEY_LEN])
 {
 	memcpy(static_identity->static_private, private_key,
 	       NOISE_PUBLIC_KEY_LEN);
@@ -313,12 +313,12 @@ void wg_noise_set_static_identity_private_key(
  *  - https://eprint.iacr.org/2010/264.pdf
  *  - https://tools.ietf.org/html/rfc5869
  */
-static void kdf(u8 *first_dst, u8 *second_dst, u8 *third_dst, const u8 *data,
+static void kdf(uint8_t *first_dst, uint8_t *second_dst, uint8_t *third_dst, const uint8_t *data,
 		size_t first_len, size_t second_len, size_t third_len,
-		size_t data_len, const u8 chaining_key[NOISE_HASH_LEN])
+		size_t data_len, const uint8_t chaining_key[NOISE_HASH_LEN])
 {
-	u8 output[BLAKE2S_HASH_SIZE + 1];
-	u8 secret[BLAKE2S_HASH_SIZE];
+	uint8_t output[BLAKE2S_HASH_SIZE + 1];
+	uint8_t secret[BLAKE2S_HASH_SIZE];
 
 	WARN_ON(IS_ENABLED(DEBUG) &&
 		(first_len > BLAKE2S_HASH_SIZE ||
@@ -377,7 +377,7 @@ static void symmetric_key_init(struct noise_symmetric_key *key)
 
 static void derive_keys(struct noise_symmetric_key *first_dst,
 			struct noise_symmetric_key *second_dst,
-			const u8 chaining_key[NOISE_HASH_LEN])
+			const uint8_t chaining_key[NOISE_HASH_LEN])
 {
 	kdf(first_dst->key, second_dst->key, NULL, NULL,
 	    NOISE_SYMMETRIC_KEY_LEN, NOISE_SYMMETRIC_KEY_LEN, 0, 0,
@@ -386,12 +386,12 @@ static void derive_keys(struct noise_symmetric_key *first_dst,
 	symmetric_key_init(second_dst);
 }
 
-static bool __must_check mix_dh(u8 chaining_key[NOISE_HASH_LEN],
-				u8 key[NOISE_SYMMETRIC_KEY_LEN],
-				const u8 private[NOISE_PUBLIC_KEY_LEN],
-				const u8 public[NOISE_PUBLIC_KEY_LEN])
+static bool __must_check mix_dh(uint8_t chaining_key[NOISE_HASH_LEN],
+				uint8_t key[NOISE_SYMMETRIC_KEY_LEN],
+				const uint8_t private[NOISE_PUBLIC_KEY_LEN],
+				const uint8_t public[NOISE_PUBLIC_KEY_LEN])
 {
-	u8 dh_calculation[NOISE_PUBLIC_KEY_LEN];
+	uint8_t dh_calculation[NOISE_PUBLIC_KEY_LEN];
 
 	if (unlikely(!curve25519(dh_calculation, private, public)))
 		return false;
@@ -401,7 +401,7 @@ static bool __must_check mix_dh(u8 chaining_key[NOISE_HASH_LEN],
 	return true;
 }
 
-static void mix_hash(u8 hash[NOISE_HASH_LEN], const u8 *src, size_t src_len)
+static void mix_hash(uint8_t hash[NOISE_HASH_LEN], const uint8_t *src, size_t src_len)
 {
 	struct blake2s_state blake;
 
@@ -411,11 +411,11 @@ static void mix_hash(u8 hash[NOISE_HASH_LEN], const u8 *src, size_t src_len)
 	blake2s_final(&blake, hash);
 }
 
-static void mix_psk(u8 chaining_key[NOISE_HASH_LEN], u8 hash[NOISE_HASH_LEN],
-		    u8 key[NOISE_SYMMETRIC_KEY_LEN],
-		    const u8 psk[NOISE_SYMMETRIC_KEY_LEN])
+static void mix_psk(uint8_t chaining_key[NOISE_HASH_LEN], uint8_t hash[NOISE_HASH_LEN],
+		    uint8_t key[NOISE_SYMMETRIC_KEY_LEN],
+		    const uint8_t psk[NOISE_SYMMETRIC_KEY_LEN])
 {
-	u8 temp_hash[NOISE_HASH_LEN];
+	uint8_t temp_hash[NOISE_HASH_LEN];
 
 	kdf(chaining_key, temp_hash, key, psk, NOISE_HASH_LEN, NOISE_HASH_LEN,
 	    NOISE_SYMMETRIC_KEY_LEN, NOISE_SYMMETRIC_KEY_LEN, chaining_key);
@@ -423,18 +423,18 @@ static void mix_psk(u8 chaining_key[NOISE_HASH_LEN], u8 hash[NOISE_HASH_LEN],
 	memzero_explicit(temp_hash, NOISE_HASH_LEN);
 }
 
-static void handshake_init(u8 chaining_key[NOISE_HASH_LEN],
-			   u8 hash[NOISE_HASH_LEN],
-			   const u8 remote_static[NOISE_PUBLIC_KEY_LEN])
+static void handshake_init(uint8_t chaining_key[NOISE_HASH_LEN],
+			   uint8_t hash[NOISE_HASH_LEN],
+			   const uint8_t remote_static[NOISE_PUBLIC_KEY_LEN])
 {
 	memcpy(hash, handshake_init_hash, NOISE_HASH_LEN);
 	memcpy(chaining_key, handshake_init_chaining_key, NOISE_HASH_LEN);
 	mix_hash(hash, remote_static, NOISE_PUBLIC_KEY_LEN);
 }
 
-static void message_encrypt(u8 *dst_ciphertext, const u8 *src_plaintext,
-			    size_t src_len, u8 key[NOISE_SYMMETRIC_KEY_LEN],
-			    u8 hash[NOISE_HASH_LEN])
+static void message_encrypt(uint8_t *dst_ciphertext, const uint8_t *src_plaintext,
+			    size_t src_len, uint8_t key[NOISE_SYMMETRIC_KEY_LEN],
+			    uint8_t hash[NOISE_HASH_LEN])
 {
 	chacha20poly1305_encrypt(dst_ciphertext, src_plaintext, src_len, hash,
 				 NOISE_HASH_LEN,
@@ -442,9 +442,9 @@ static void message_encrypt(u8 *dst_ciphertext, const u8 *src_plaintext,
 	mix_hash(hash, dst_ciphertext, noise_encrypted_len(src_len));
 }
 
-static bool message_decrypt(u8 *dst_plaintext, const u8 *src_ciphertext,
-			    size_t src_len, u8 key[NOISE_SYMMETRIC_KEY_LEN],
-			    u8 hash[NOISE_HASH_LEN])
+static bool message_decrypt(uint8_t *dst_plaintext, const uint8_t *src_ciphertext,
+			    size_t src_len, uint8_t key[NOISE_SYMMETRIC_KEY_LEN],
+			    uint8_t hash[NOISE_HASH_LEN])
 {
 	if (!chacha20poly1305_decrypt(dst_plaintext, src_ciphertext, src_len,
 				      hash, NOISE_HASH_LEN,
@@ -454,10 +454,10 @@ static bool message_decrypt(u8 *dst_plaintext, const u8 *src_ciphertext,
 	return true;
 }
 
-static void message_ephemeral(u8 ephemeral_dst[NOISE_PUBLIC_KEY_LEN],
-			      const u8 ephemeral_src[NOISE_PUBLIC_KEY_LEN],
-			      u8 chaining_key[NOISE_HASH_LEN],
-			      u8 hash[NOISE_HASH_LEN])
+static void message_ephemeral(uint8_t ephemeral_dst[NOISE_PUBLIC_KEY_LEN],
+			      const uint8_t ephemeral_src[NOISE_PUBLIC_KEY_LEN],
+			      uint8_t chaining_key[NOISE_HASH_LEN],
+			      uint8_t hash[NOISE_HASH_LEN])
 {
 	if (ephemeral_dst != ephemeral_src)
 		memcpy(ephemeral_dst, ephemeral_src, NOISE_PUBLIC_KEY_LEN);
@@ -466,7 +466,7 @@ static void message_ephemeral(u8 ephemeral_dst[NOISE_PUBLIC_KEY_LEN],
 	    NOISE_PUBLIC_KEY_LEN, chaining_key);
 }
 
-static void tai64n_now(u8 output[NOISE_TIMESTAMP_LEN])
+static void tai64n_now(uint8_t output[NOISE_TIMESTAMP_LEN])
 {
 	struct timespec64 now;
 
@@ -489,8 +489,8 @@ bool
 wg_noise_handshake_create_initiation(struct message_handshake_initiation *dst,
 				     struct noise_handshake *handshake)
 {
-	u8 timestamp[NOISE_TIMESTAMP_LEN];
-	u8 key[NOISE_SYMMETRIC_KEY_LEN];
+	uint8_t timestamp[NOISE_TIMESTAMP_LEN];
+	uint8_t key[NOISE_SYMMETRIC_KEY_LEN];
 	bool ret = false;
 
 	/* We need to wait for crng _before_ taking any locks, since
@@ -560,13 +560,13 @@ wg_noise_handshake_consume_initiation(struct message_handshake_initiation *src,
 	struct wg_peer *peer = NULL, *ret_peer = NULL;
 	struct noise_handshake *handshake;
 	bool replay_attack, flood_attack;
-	u8 key[NOISE_SYMMETRIC_KEY_LEN];
-	u8 chaining_key[NOISE_HASH_LEN];
-	u8 hash[NOISE_HASH_LEN];
-	u8 s[NOISE_PUBLIC_KEY_LEN];
-	u8 e[NOISE_PUBLIC_KEY_LEN];
-	u8 t[NOISE_TIMESTAMP_LEN];
-	u64 initiation_consumption;
+	uint8_t key[NOISE_SYMMETRIC_KEY_LEN];
+	uint8_t chaining_key[NOISE_HASH_LEN];
+	uint8_t hash[NOISE_HASH_LEN];
+	uint8_t s[NOISE_PUBLIC_KEY_LEN];
+	uint8_t e[NOISE_PUBLIC_KEY_LEN];
+	uint8_t t[NOISE_TIMESTAMP_LEN];
+	uint64_t initiation_consumption;
 
 	down_read(&wg->static_identity.lock);
 	if (unlikely(!wg->static_identity.has_identity))
@@ -640,7 +640,7 @@ out:
 bool wg_noise_handshake_create_response(struct message_handshake_response *dst,
 					struct noise_handshake *handshake)
 {
-	u8 key[NOISE_SYMMETRIC_KEY_LEN];
+	uint8_t key[NOISE_SYMMETRIC_KEY_LEN];
 	bool ret = false;
 
 	/* We need to wait for crng _before_ taking any locks, since
@@ -704,12 +704,12 @@ wg_noise_handshake_consume_response(struct message_handshake_response *src,
 	enum noise_handshake_state state = HANDSHAKE_ZEROED;
 	struct wg_peer *peer = NULL, *ret_peer = NULL;
 	struct noise_handshake *handshake;
-	u8 key[NOISE_SYMMETRIC_KEY_LEN];
-	u8 hash[NOISE_HASH_LEN];
-	u8 chaining_key[NOISE_HASH_LEN];
-	u8 e[NOISE_PUBLIC_KEY_LEN];
-	u8 ephemeral_private[NOISE_PUBLIC_KEY_LEN];
-	u8 static_private[NOISE_PUBLIC_KEY_LEN];
+	uint8_t key[NOISE_SYMMETRIC_KEY_LEN];
+	uint8_t hash[NOISE_HASH_LEN];
+	uint8_t chaining_key[NOISE_HASH_LEN];
+	uint8_t e[NOISE_PUBLIC_KEY_LEN];
+	uint8_t ephemeral_private[NOISE_PUBLIC_KEY_LEN];
+	uint8_t static_private[NOISE_PUBLIC_KEY_LEN];
 
 	down_read(&wg->static_identity.lock);
 

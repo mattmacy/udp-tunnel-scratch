@@ -1,34 +1,29 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/*
- * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
- */
-
 #ifndef _WG_COOKIE_H
 #define _WG_COOKIE_H
 
 #include "messages.h"
-#include <linux/rwsem.h>
+#include <sys/sx.h>
 
 struct wg_peer;
 
 struct cookie_checker {
-	u8 secret[NOISE_HASH_LEN];
-	u8 cookie_encryption_key[NOISE_SYMMETRIC_KEY_LEN];
-	u8 message_mac1_key[NOISE_SYMMETRIC_KEY_LEN];
-	u64 secret_birthdate;
-	struct rw_semaphore secret_lock;
+	uint8_t secret[NOISE_HASH_LEN];
+	uint8_t cookie_encryption_key[NOISE_SYMMETRIC_KEY_LEN];
+	uint8_t message_mac1_key[NOISE_SYMMETRIC_KEY_LEN];
+	uint64_t secret_birthdate;
+	struct sx secret_lock;
 	struct wg_device *device;
 };
 
 struct cookie {
-	u64 birthdate;
+	uint64_t birthdate;
 	bool is_valid;
-	u8 cookie[COOKIE_LEN];
+	uint8_t cookie[COOKIE_LEN];
 	bool have_sent_mac1;
-	u8 last_mac1_sent[COOKIE_LEN];
-	u8 cookie_decryption_key[NOISE_SYMMETRIC_KEY_LEN];
-	u8 message_mac1_key[NOISE_SYMMETRIC_KEY_LEN];
-	struct rw_semaphore lock;
+	uint8_t last_mac1_sent[COOKIE_LEN];
+	uint8_t cookie_decryption_key[NOISE_SYMMETRIC_KEY_LEN];
+	uint8_t message_mac1_key[NOISE_SYMMETRIC_KEY_LEN];
+	struct sx lock;
 };
 
 enum cookie_mac_state {

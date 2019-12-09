@@ -21,11 +21,11 @@ void wg_timers_handshake_complete(struct wg_peer *peer);
 void wg_timers_session_derived(struct wg_peer *peer);
 void wg_timers_any_authenticated_packet_traversal(struct wg_peer *peer);
 
-static inline bool wg_birthdate_has_expired(u64 birthday_nanoseconds,
-					    u64 expiration_seconds)
+static inline bool wg_birthdate_has_expired(uint64_t birthday_nanoseconds,
+					    uint64_t expiration_seconds)
 {
-	return (s64)(birthday_nanoseconds + expiration_seconds * NSEC_PER_SEC)
-		<= (s64)ktime_get_coarse_boottime_ns();
+	return (int64_t)(birthday_nanoseconds + expiration_seconds * NSEC_PER_SEC)
+		<= (int64_t)ktime_get_coarse_boottime_ns();
 }
 
 #endif /* _WG_TIMERS_H */
