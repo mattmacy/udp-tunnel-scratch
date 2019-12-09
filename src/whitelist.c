@@ -185,7 +185,7 @@ lookup(struct whitelist_node __rcu *root, uint8_t bits,
 	struct whitelist_node *node;
 	struct wg_peer *peer = NULL;
 
-	swap_endian(ip, be_ip, bits);
+	native_endian(ip, be_ip, bits);
 
 	rcu_read_lock_bh();
 retry:
@@ -333,7 +333,7 @@ wg_whitelist_insert_v4(struct whitelist *table, const struct in_addr *ip,
 	uint8_t key[4] __aligned(__alignof(u32));
 
 	++table->seq;
-	swap_endian(key, (const uint8_t *)ip, 32);
+	native_endian(key, (const uint8_t *)ip, 32);
 	return add(&table->root4, 32, key, cidr, peer, lock);
 }
 
@@ -345,7 +345,7 @@ wg_whitelist_insert_v6(struct whitelist *table, const struct in6_addr *ip,
 	uint8_t key[16] __aligned(__alignof(uint64_t));
 
 	++table->seq;
-	swap_endian(key, (const uint8_t *)ip, 128);
+	native_endian(key, (const uint8_t *)ip, 128);
 	return add(&table->root6, 128, key, cidr, peer, lock);
 }
 
@@ -362,7 +362,7 @@ int
 wg_whitelist_read_node(struct whitelist_node *node, uint8_t ip[16], uint8_t *cidr)
 {
 	const unsigned int cidr_bytes = DIV_ROUND_UP(node->cidr, 8U);
-	swap_endian(ip, node->bits, node->bitlen);
+	native_endian(ip, node->bits, node->bitlen);
 	memset(ip + cidr_bytes, 0, node->bitlen / 8U - cidr_bytes);
 	if (node->cidr)
 		ip[cidr_bytes - 1U] &= ~0U << (-node->cidr % 8U);
