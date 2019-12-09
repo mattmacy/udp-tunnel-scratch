@@ -1,4 +1,4 @@
-#include "allowedips.h"
+#include "whitelist.h"
 #include "peer.h"
 
 static void
@@ -13,7 +13,7 @@ native_endian(uint8_t *dst, const uint8_t *src, uint8_t bits)
 }
 
 static void
-copy_and_assign_cidr(struct allowedips_node *node, const uint8_t *src,
+copy_and_assign_cidr(struct whitelist_node *node, const uint8_t *src,
     uint8_t cidr, uint8_t bits)
 {
 	node->cidr = cidr;
@@ -28,13 +28,15 @@ copy_and_assign_cidr(struct allowedips_node *node, const uint8_t *src,
 #define CHOOSE_NODE(parent, key) \
 	parent->bit[(key[parent->bit_at_a] >> parent->bit_at_b) & 1]
 
-static void node_free_rcu(struct rcu_head *rcu)
+static void
+node_free_rcu(struct rcu_head *rcu)
 {
-	kfree(container_of(rcu, struct allowedips_node, rcu));
+	kfree(container_of(rcu, struct whitelist_node, rcu));
 }
 
-static void push_rcu(struct allowedips_node **stack,
-		     struct allowedips_node __rcu *p, unsigned int *len)
+static void
+push_rcu(struct whitelist_node **stack,
+		     struct whitelist_node __rcu *p, unsigned int *len)
 {
 	if (rcu_access_pointer(p)) {
 		WARN_ON(IS_ENABLED(DEBUG) && *len >= 128);
@@ -42,10 +44,11 @@ static void push_rcu(struct allowedips_node **stack,
 	}
 }
 
-static void root_free_rcu(struct rcu_head *rcu)
+static void
+root_free_rcu(struct rcu_head *rcu)
 {
-	struct allowedips_node *node, *stack[128] = {
-		container_of(rcu, struct allowedips_node, rcu) };
+	struct whitelist_node *node, *stack[128] = {
+		container_of(rcu, struct whitelist_node, rcu) };
 	unsigned int len = 1;
 
 	while (len > 0 && (node = stack[--len])) {
@@ -55,9 +58,10 @@ static void root_free_rcu(struct rcu_head *rcu)
 	}
 }
 
-static void root_remove_peer_lists(struct allowedips_node *root)
+static void
+root_remove_peer_lists(struct whitelist_node *root)
 {
-	struct allowedips_node *node, *stack[128] = { root };
+	struct whitelist_node *node, *stack[128] = { root };
 	unsigned int len = 1;
 
 	while (len > 0 && (node = stack[--len])) {
@@ -68,7 +72,8 @@ static void root_remove_peer_lists(struct allowedips_node *root)
 	}
 }
 
-static void walk_remove_by_peer(struct allowedips_node __rcu **top,
+static void
+walk_remove_by_peer(struct whitelist_node __rcu **top,
 				struct wg_peer *peer, struct mutex *lock)
 {
 #define REF(p) rcu_access_pointer(p)
@@ -78,8 +83,8 @@ static void walk_remove_by_peer(struct allowedips_node __rcu **top,
 		stack[len++] = p;                                              \
 	})
 
-	struct allowedips_node __rcu **stack[128], **nptr;
-	struct allowedips_node *node, *prev;
+	struct whitelist_node __rcu **stack[128], **nptr;
+	struct whitelist_node *node, *prev;
 	unsigned int len;
 
 	if (unlikely(!peer || !REF(*top)))
@@ -122,12 +127,14 @@ static void walk_remove_by_peer(struct allowedips_node __rcu **top,
 #undef PUSH
 }
 
-static unsigned int fls128(u64 a, u64 b)
+static unsigned int
+fls128(u64 a, u64 b)
 {
 	return a ? fls64(a) + 64U : fls64(b);
 }
 
-static uint8_t common_bits(const struct allowedips_node *node, const uint8_t *key,
+static uint8_t
+common_bits(const struct whitelist_node *node, const uint8_t *key,
 		      uint8_t bits)
 {
 	if (bits == 32)
@@ -139,7 +146,8 @@ static uint8_t common_bits(const struct allowedips_node *node, const uint8_t *ke
 	return 0;
 }
 
-static bool prefix_matches(const struct allowedips_node *node, const uint8_t *key,
+static bool
+prefix_matches(const struct whitelist_node *node, const uint8_t *key,
 			   uint8_t bits)
 {
 	/* This could be much faster if it actually just compared the common
@@ -151,10 +159,11 @@ static bool prefix_matches(const struct allowedips_node *node, const uint8_t *ke
 	return common_bits(node, key, bits) >= node->cidr;
 }
 
-static struct allowedips_node *find_node(struct allowedips_node *trie, uint8_t bits,
+static struct whitelist_node *
+find_node(struct whitelist_node *trie, uint8_t bits,
 					 const uint8_t *key)
 {
-	struct allowedips_node *node = trie, *found = NULL;
+	struct whitelist_node *node = trie, *found = NULL;
 
 	while (node && prefix_matches(node, key, bits)) {
 		if (rcu_access_pointer(node->peer))
@@ -167,12 +176,13 @@ static struct allowedips_node *find_node(struct allowedips_node *trie, uint8_t b
 }
 
 /* Returns a strong reference to a peer */
-static struct wg_peer *lookup(struct allowedips_node __rcu *root, uint8_t bits,
+static struct wg_peer *
+lookup(struct whitelist_node __rcu *root, uint8_t bits,
 			      const void *be_ip)
 {
 	/* Aligned so it can be passed to fls/fls64 */
 	uint8_t ip[16] __aligned(__alignof(u64));
-	struct allowedips_node *node;
+	struct whitelist_node *node;
 	struct wg_peer *peer = NULL;
 
 	swap_endian(ip, be_ip, bits);
@@ -189,13 +199,14 @@ retry:
 	return peer;
 }
 
-static bool node_placement(struct allowedips_node __rcu *trie, const uint8_t *key,
-			   uint8_t cidr, uint8_t bits, struct allowedips_node **rnode,
+static bool
+node_placement(struct whitelist_node __rcu *trie, const uint8_t *key,
+			   uint8_t cidr, uint8_t bits, struct whitelist_node **rnode,
 			   struct mutex *lock)
 {
-	struct allowedips_node *node = rcu_dereference_protected(trie,
+	struct whitelist_node *node = rcu_dereference_protected(trie,
 						lockdep_is_held(lock));
-	struct allowedips_node *parent = NULL;
+	struct whitelist_node *parent = NULL;
 	bool exact = false;
 
 	while (node && node->cidr <= cidr && prefix_matches(node, key, bits)) {
@@ -211,10 +222,11 @@ static bool node_placement(struct allowedips_node __rcu *trie, const uint8_t *ke
 	return exact;
 }
 
-static int add(struct allowedips_node __rcu **trie, uint8_t bits, const uint8_t *key,
+static int
+add(struct whitelist_node __rcu **trie, uint8_t bits, const uint8_t *key,
 	       uint8_t cidr, struct wg_peer *peer, struct mutex *lock)
 {
-	struct allowedips_node *node, *parent, *down, *newnode;
+	struct whitelist_node *node, *parent, *down, *newnode;
 
 	if (unlikely(cidr > bits || !peer))
 		return -EINVAL;
@@ -224,14 +236,14 @@ static int add(struct allowedips_node __rcu **trie, uint8_t bits, const uint8_t 
 		if (unlikely(!node))
 			return -ENOMEM;
 		RCU_INIT_POINTER(node->peer, peer);
-		list_add_tail(&node->peer_list, &peer->allowedips_list);
+		list_add_tail(&node->peer_list, &peer->whitelist_list);
 		copy_and_assign_cidr(node, key, cidr, bits);
 		rcu_assign_pointer(*trie, node);
 		return 0;
 	}
 	if (node_placement(*trie, key, cidr, bits, &node, lock)) {
 		rcu_assign_pointer(node->peer, peer);
-		list_move_tail(&node->peer_list, &peer->allowedips_list);
+		list_move_tail(&node->peer_list, &peer->whitelist_list);
 		return 0;
 	}
 
@@ -239,7 +251,7 @@ static int add(struct allowedips_node __rcu **trie, uint8_t bits, const uint8_t 
 	if (unlikely(!newnode))
 		return -ENOMEM;
 	RCU_INIT_POINTER(newnode->peer, peer);
-	list_add_tail(&newnode->peer_list, &peer->allowedips_list);
+	list_add_tail(&newnode->peer_list, &peer->whitelist_list);
 	copy_and_assign_cidr(newnode, key, cidr, bits);
 
 	if (!node) {
@@ -282,28 +294,30 @@ static int add(struct allowedips_node __rcu **trie, uint8_t bits, const uint8_t 
 	return 0;
 }
 
-void wg_allowedips_init(struct allowedips *table)
+void
+wg_whitelist_init(struct whitelist *table)
 {
 	table->root4 = table->root6 = NULL;
 	table->seq = 1;
 }
 
-void wg_allowedips_free(struct allowedips *table, struct mutex *lock)
+void
+wg_whitelist_free(struct whitelist *table, struct mutex *lock)
 {
-	struct allowedips_node __rcu *old4 = table->root4, *old6 = table->root6;
+	struct whitelist_node __rcu *old4 = table->root4, *old6 = table->root6;
 
 	++table->seq;
 	RCU_INIT_POINTER(table->root4, NULL);
 	RCU_INIT_POINTER(table->root6, NULL);
 	if (rcu_access_pointer(old4)) {
-		struct allowedips_node *node = rcu_dereference_protected(old4,
+		struct whitelist_node *node = rcu_dereference_protected(old4,
 							lockdep_is_held(lock));
 
 		root_remove_peer_lists(node);
 		call_rcu(&node->rcu, root_free_rcu);
 	}
 	if (rcu_access_pointer(old6)) {
-		struct allowedips_node *node = rcu_dereference_protected(old6,
+		struct whitelist_node *node = rcu_dereference_protected(old6,
 							lockdep_is_held(lock));
 
 		root_remove_peer_lists(node);
@@ -311,7 +325,8 @@ void wg_allowedips_free(struct allowedips *table, struct mutex *lock)
 	}
 }
 
-int wg_allowedips_insert_v4(struct allowedips *table, const struct in_addr *ip,
+int
+wg_whitelist_insert_v4(struct whitelist *table, const struct in_addr *ip,
 			    uint8_t cidr, struct wg_peer *peer, struct mutex *lock)
 {
 	/* Aligned so it can be passed to fls */
@@ -322,7 +337,8 @@ int wg_allowedips_insert_v4(struct allowedips *table, const struct in_addr *ip,
 	return add(&table->root4, 32, key, cidr, peer, lock);
 }
 
-int wg_allowedips_insert_v6(struct allowedips *table, const struct in6_addr *ip,
+int
+wg_whitelist_insert_v6(struct whitelist *table, const struct in6_addr *ip,
 			    uint8_t cidr, struct wg_peer *peer, struct mutex *lock)
 {
 	/* Aligned so it can be passed to fls64 */
@@ -333,7 +349,8 @@ int wg_allowedips_insert_v6(struct allowedips *table, const struct in6_addr *ip,
 	return add(&table->root6, 128, key, cidr, peer, lock);
 }
 
-void wg_allowedips_remove_by_peer(struct allowedips *table,
+void
+wg_whitelist_remove_by_peer(struct whitelist *table,
 				  struct wg_peer *peer, struct mutex *lock)
 {
 	++table->seq;
@@ -341,7 +358,8 @@ void wg_allowedips_remove_by_peer(struct allowedips *table,
 	walk_remove_by_peer(&table->root6, peer, lock);
 }
 
-int wg_allowedips_read_node(struct allowedips_node *node, uint8_t ip[16], uint8_t *cidr)
+int
+wg_whitelist_read_node(struct whitelist_node *node, uint8_t ip[16], uint8_t *cidr)
 {
 	const unsigned int cidr_bytes = DIV_ROUND_UP(node->cidr, 8U);
 	swap_endian(ip, node->bits, node->bitlen);
@@ -354,7 +372,8 @@ int wg_allowedips_read_node(struct allowedips_node *node, uint8_t ip[16], uint8_
 }
 
 /* Returns a strong reference to a peer */
-struct wg_peer *wg_allowedips_lookup_dst(struct allowedips *table,
+struct wg_peer *
+wg_whitelist_lookup_dst(struct whitelist *table,
 					 struct sk_buff *skb)
 {
 	if (skb->protocol == htons(ETH_P_IP))
@@ -365,7 +384,8 @@ struct wg_peer *wg_allowedips_lookup_dst(struct allowedips *table,
 }
 
 /* Returns a strong reference to a peer */
-struct wg_peer *wg_allowedips_lookup_src(struct allowedips *table,
+struct wg_peer *
+wg_whitelist_lookup_src(struct whitelist *table,
 					 struct sk_buff *skb)
 {
 	if (skb->protocol == htons(ETH_P_IP))
@@ -375,4 +395,4 @@ struct wg_peer *wg_allowedips_lookup_src(struct allowedips *table,
 	return NULL;
 }
 
-#include "selftest/allowedips.c"
+//#include "selftest/whitelist.c"
