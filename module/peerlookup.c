@@ -173,7 +173,7 @@ wg_index_hashtable_replace(struct index_hashtable *table,
     struct index_hashtable_entry *old,
     struct index_hashtable_entry *new)
 {
-	if (unlikely(hlist_unhashed(&old->index_hash)))
+	if (__predict_false(hlist_unhashed(&old->index_hash)))
 		return false;
 	spin_lock_bh(&table->lock);
 	new->index = old->index;
@@ -211,14 +211,14 @@ wg_index_hashtable_lookup(struct index_hashtable *table,
 	hlist_for_each_entry_rcu_bh(iter_entry, index_bucket(table, index),
 				    index_hash) {
 		if (iter_entry->index == index) {
-			if (likely(iter_entry->type & type_mask))
+			if (__predict_true(iter_entry->type & type_mask))
 				entry = iter_entry;
 			break;
 		}
 	}
-	if (likely(entry)) {
+	if (__predict_true(entry)) {
 		entry->peer = wg_peer_get_maybe_zero(entry->peer);
-		if (likely(entry->peer))
+		if (__predict_true(entry->peer))
 			*peer = entry->peer;
 		else
 			entry = NULL;

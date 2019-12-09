@@ -1,9 +1,11 @@
 #ifndef _WG_WHITELIST_H
 #define _WG_WHITELIST_H
 
-#include <linux/mutex.h>
-#include <linux/ip.h>
-#include <linux/ipv6.h>
+#include <sys/lock.h>
+#include <sys/mutex.h>
+#include <netinet/in.h>
+#include <netinet/ip.h>
+#include <netinet/ip6.h>
 
 struct wg_peer;
 
@@ -12,8 +14,8 @@ struct whitelist_node {
 	uint8_t bits[16] __aligned(__alignof(uint64_t));
 	uint8_t cidr, bit_at_a, bit_at_b, bitlen;
 	union {
-		struct list_head peer_list;
-		struct rcu_head rcu;
+		//struct list_head peer_list;
+		//struct rcu_head rcu;
 	};
 };
 
@@ -24,13 +26,13 @@ struct whitelist {
 };
 
 void wg_whitelist_init(struct whitelist *table);
-void wg_whitelist_free(struct whitelist *table, struct mutex *mutex);
+void wg_whitelist_free(struct whitelist *table, struct mtx *mutex);
 int wg_whitelist_insert_v4(struct whitelist *table, const struct in_addr *ip,
-			    uint8_t cidr, struct wg_peer *peer, struct mutex *lock);
+			    uint8_t cidr, struct wg_peer *peer, struct mtx *lock);
 int wg_whitelist_insert_v6(struct whitelist *table, const struct in6_addr *ip,
-			    uint8_t cidr, struct wg_peer *peer, struct mutex *lock);
+			    uint8_t cidr, struct wg_peer *peer, struct mtx *lock);
 void wg_whitelist_remove_by_peer(struct whitelist *table,
-				  struct wg_peer *peer, struct mutex *lock);
+				  struct wg_peer *peer, struct mtx *lock);
 int wg_whitelist_read_node(struct whitelist_node *node, uint8_t ip[16], uint8_t *cidr);
 
 /* These return a strong reference to a peer: */

@@ -29,7 +29,7 @@ static const uint8_t handshake_name[37] = "Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s
 static const uint8_t identifier_name[34] = "WireGuard v1 zx2c4 Jason@zx2c4.com";
 static uint8_t handshake_init_hash[NOISE_HASH_LEN] __ro_after_init;
 static uint8_t handshake_init_chaining_key[NOISE_HASH_LEN] __ro_after_init;
-static atomic64_t keypair_counter = ATOMIC64_INIT(0);
+//static atomic64_t keypair_counter = ATOMIC64_INIT(0);
 
 void __init wg_noise_init(void)
 {
@@ -107,7 +107,7 @@ static struct noise_keypair *keypair_create(struct wg_peer *peer)
 {
 	struct noise_keypair *keypair = kzalloc(sizeof(*keypair), GFP_KERNEL);
 
-	if (unlikely(!keypair))
+	if (__predict_false(!keypair))
 		return NULL;
 	keypair->internal_id = atomic64_inc_return(&keypair_counter);
 	keypair->entry.type = INDEX_HASHTABLE_KEYPAIR;
@@ -137,9 +137,9 @@ static void keypair_free_kref(struct kref *kref)
 
 void wg_noise_keypair_put(struct noise_keypair *keypair, bool unreference_now)
 {
-	if (unlikely(!keypair))
+	if (__predict_false(!keypair))
 		return;
-	if (unlikely(unreference_now))
+	if (__predict_false(unreference_now))
 		wg_index_hashtable_remove(
 			keypair->entry.peer->device->index_hashtable,
 			&keypair->entry);
@@ -150,7 +150,7 @@ struct noise_keypair *wg_noise_keypair_get(struct noise_keypair *keypair)
 {
 	RCU_LOCKDEP_WARN(!rcu_read_lock_bh_held(),
 		"Taking noise keypair reference without holding the RCU BH read lock");
-	if (unlikely(!keypair || !kref_get_unless_zero(&keypair->refcount)))
+	if (__predict_false(!keypair || !kref_get_unless_zero(&keypair->refcount)))
 		return NULL;
 	return keypair;
 }
@@ -266,14 +266,14 @@ bool wg_noise_received_with_keypair(struct noise_keypairs *keypairs,
 	/* We first check without taking the spinlock. */
 	key_is_new = received_keypair ==
 		     rcu_access_pointer(keypairs->next_keypair);
-	if (likely(!key_is_new))
+	if (__predict_true(!key_is_new))
 		return false;
 
 	spin_lock_bh(&keypairs->keypair_update_lock);
 	/* After locking, we double check that things didn't change from
 	 * beneath us.
 	 */
-	if (unlikely(received_keypair !=
+	if (__predict_false(received_keypair !=
 		    rcu_dereference_protected(keypairs->next_keypair,
 			    lockdep_is_held(&keypairs->keypair_update_lock)))) {
 		spin_unlock_bh(&keypairs->keypair_update_lock);
@@ -386,14 +386,14 @@ static void derive_keys(struct noise_symmetric_key *first_dst,
 	symmetric_key_init(second_dst);
 }
 
-static bool __must_check mix_dh(uint8_t chaining_key[NOISE_HASH_LEN],
+static bool mix_dh(uint8_t chaining_key[NOISE_HASH_LEN],
 				uint8_t key[NOISE_SYMMETRIC_KEY_LEN],
 				const uint8_t private[NOISE_PUBLIC_KEY_LEN],
 				const uint8_t public[NOISE_PUBLIC_KEY_LEN])
 {
 	uint8_t dh_calculation[NOISE_PUBLIC_KEY_LEN];
 
-	if (unlikely(!curve25519(dh_calculation, private, public)))
+	if (__predict_false(!curve25519(dh_calculation, private, public)))
 		return false;
 	kdf(chaining_key, key, NULL, dh_calculation, NOISE_HASH_LEN,
 	    NOISE_SYMMETRIC_KEY_LEN, 0, NOISE_PUBLIC_KEY_LEN, chaining_key);
@@ -468,7 +468,7 @@ static void message_ephemeral(uint8_t ephemeral_dst[NOISE_PUBLIC_KEY_LEN],
 
 static void tai64n_now(uint8_t output[NOISE_TIMESTAMP_LEN])
 {
-	struct timespec64 now;
+	struct timespec now;
 
 	ktime_get_real_ts64(&now);
 
@@ -501,7 +501,7 @@ wg_noise_handshake_create_initiation(struct message_handshake_initiation *dst,
 	down_read(&handshake->static_identity->lock);
 	down_write(&handshake->lock);
 
-	if (unlikely(!handshake->static_identity->has_identity))
+	if (__predict_false(!handshake->static_identity->has_identity))
 		goto out;
 
 	dst->header.type = cpu_to_le32(MESSAGE_HANDSHAKE_INITIATION);
@@ -569,7 +569,7 @@ wg_noise_handshake_consume_initiation(struct message_handshake_initiation *src,
 	uint64_t initiation_consumption;
 
 	down_read(&wg->static_identity.lock);
-	if (unlikely(!wg->static_identity.has_identity))
+	if (__predict_false(!wg->static_identity.has_identity))
 		goto out;
 
 	handshake_init(chaining_key, hash, wg->static_identity.static_public);
@@ -713,13 +713,13 @@ wg_noise_handshake_consume_response(struct message_handshake_response *src,
 
 	down_read(&wg->static_identity.lock);
 
-	if (unlikely(!wg->static_identity.has_identity))
+	if (__predict_false(!wg->static_identity.has_identity))
 		goto out;
 
 	handshake = (struct noise_handshake *)wg_index_hashtable_lookup(
 		wg->index_hashtable, INDEX_HASHTABLE_HANDSHAKE,
 		src->receiver_index, &peer);
-	if (unlikely(!handshake))
+	if (__predict_false(!handshake))
 		goto out;
 
 	down_read(&handshake->lock);
@@ -809,7 +809,7 @@ bool wg_noise_handshake_begin_session(struct noise_handshake *handshake,
 
 	handshake_zero(handshake);
 	rcu_read_lock_bh();
-	if (likely(!READ_ONCE(container_of(handshake, struct wg_peer,
+	if (__predict_true(!READ_ONCE(container_of(handshake, struct wg_peer,
 					   handshake)->is_dead))) {
 		add_new_keypair(keypairs, new_keypair);
 		net_dbg_ratelimited("%s: Keypair %llu created for peer %llu\n",

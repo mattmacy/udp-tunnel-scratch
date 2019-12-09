@@ -1,23 +1,26 @@
 #ifndef _WG_NOISE_H
 #define _WG_NOISE_H
 
-#include "messages.h"
-#include "peerlookup.h"
+#include <sys/messages.h>
+#include <sys/peerlookup.h>
 
-#include <linux/types.h>
+#include <sys/types.h>
+#include <sys/timex.h>
+#if 0
 #include <linux/spinlock.h>
 #include <linux/atomic.h>
 #include <linux/rwsem.h>
 #include <linux/mutex.h>
 #include <linux/kref.h>
+#endif
 
 union noise_counter {
 	struct {
 		uint64_t counter;
-		unsigned long backtrack[COUNTER_BITS_TOTAL / BITS_PER_LONG];
-		spinlock_t lock;
+		unsigned long backtrack[COUNTER_BITS_TOTAL / __LONG_BIT];
+		//spinlock_t lock;
 	} receive;
-	atomic64_t counter;
+	//atomic64_t counter;
 };
 
 struct noise_symmetric_key {
@@ -31,25 +34,25 @@ struct noise_keypair {
 	struct index_hashtable_entry entry;
 	struct noise_symmetric_key sending;
 	struct noise_symmetric_key receiving;
-	__le32 remote_index;
+	uint32_t remote_index;
 	bool i_am_the_initiator;
 	uint64_t internal_id;
 
-	struct kref refcount;
-	struct rcu_head rcu;
+	//	struct kref refcount;
+	//	struct rcu_head rcu;
 };
 
 struct noise_keypairs {
-	struct noise_keypair __rcu *current_keypair;
-	struct noise_keypair __rcu *previous_keypair;
-	struct noise_keypair __rcu *next_keypair;
-	spinlock_t keypair_update_lock;
+	struct noise_keypair /* __rcu */ *current_keypair;
+	struct noise_keypair /* __rcu */ *previous_keypair;
+	struct noise_keypair /* __rcu */ *next_keypair;
+	struct mtx keypair_update_lock;
 };
 
 struct noise_static_identity {
 	uint8_t static_public[NOISE_PUBLIC_KEY_LEN];
 	uint8_t static_private[NOISE_PUBLIC_KEY_LEN];
-	struct rw_semaphore lock;
+	struct sx nsi_lock;
 	bool has_identity;
 };
 
@@ -80,12 +83,12 @@ struct noise_handshake {
 	uint8_t chaining_key[NOISE_HASH_LEN];
 
 	uint8_t latest_timestamp[NOISE_TIMESTAMP_LEN];
-	__le32 remote_index;
+	uint32_t remote_index;
 
 	/* Protects all members except the immutable (after noise_handshake_
 	 * init): remote_static, precomputed_static_static, static_identity.
 	 */
-	struct rw_semaphore lock;
+	struct sx nh_lock;
 };
 
 struct wg_device;
@@ -97,10 +100,10 @@ bool wg_noise_handshake_init(struct noise_handshake *handshake,
 			   const uint8_t peer_preshared_key[NOISE_SYMMETRIC_KEY_LEN],
 			   struct wg_peer *peer);
 void wg_noise_handshake_clear(struct noise_handshake *handshake);
-static inline void wg_noise_reset_last_sent_handshake(atomic64_t *handshake_ns)
+static inline void wg_noise_reset_last_sent_handshake(volatile uint64_t *handshake_ns)
 {
-	atomic64_set(handshake_ns, ktime_get_coarse_boottime_ns() -
-				       (uint64_t)(REKEY_TIMEOUT + 1) * NSEC_PER_SEC);
+	atomic_store_rel_64(handshake_ns, getnanouptime() -
+				       (uint64_t)(REKEY_TIMEOUT + 1) * NANOSECOND);
 }
 
 void wg_noise_keypair_put(struct noise_keypair *keypair, bool unreference_now);

@@ -6,15 +6,12 @@
 #ifndef _WG_PEER_H
 #define _WG_PEER_H
 
-#include "device.h"
-#include "noise.h"
-#include "cookie.h"
+#include <sys/device.h>
+#include <sys/noise.h>
+#include <sys/cookie.h>
 
-#include <linux/types.h>
-#include <linux/netfilter.h>
-#include <linux/spinlock.h>
-#include <linux/kref.h>
-#include <net/dst_cache.h>
+#include <sys/types.h>
+
 
 struct wg_device;
 
@@ -37,32 +34,32 @@ struct endpoint {
 struct wg_peer {
 	struct wg_device *device;
 	struct crypt_queue tx_queue, rx_queue;
-	struct sk_buff_head staged_packet_queue;
+	//struct sk_buff_head staged_packet_queue;
 	int serial_work_cpu;
 	struct noise_keypairs keypairs;
 	struct endpoint endpoint;
-	struct dst_cache endpoint_cache;
-	rwlock_t endpoint_lock;
+	//struct dst_cache endpoint_cache;
+	struct rwlock endpoint_lock;
 	struct noise_handshake handshake;
-	atomic64_t last_sent_handshake;
-	struct work_struct transmit_handshake_work, clear_peer_work;
+	//atomic64_t last_sent_handshake;
+	//struct work_struct transmit_handshake_work, clear_peer_work;
 	struct cookie latest_cookie;
-	struct hlist_node pubkey_hash;
+	//struct hlist_node pubkey_hash;
 	uint64_t rx_bytes, tx_bytes;
-	struct timer_list timer_retransmit_handshake, timer_send_keepalive;
-	struct timer_list timer_new_handshake, timer_zero_key_material;
-	struct timer_list timer_persistent_keepalive;
+	//struct timer_list timer_retransmit_handshake, timer_send_keepalive;
+	//struct timer_list timer_new_handshake, timer_zero_key_material;
+	//struct timer_list timer_persistent_keepalive;
 	unsigned int timer_handshake_attempts;
-	u16 persistent_keepalive_interval;
+	uint16_t persistent_keepalive_interval;
 	bool timer_need_another_keepalive;
 	bool sent_lastminute_handshake;
-	struct timespec64 walltime_last_handshake;
-	struct kref refcount;
-	struct rcu_head rcu;
-	struct list_head peer_list;
-	struct list_head allowedips_list;
+	struct timespec walltime_last_handshake;
+	//struct kref refcount;
+	//struct rcu_head rcu;
+	//struct list_head peer_list;
+	//struct list_head allowedips_list;
 	uint64_t internal_id;
-	struct napi_struct napi;
+	//struct napi_struct napi;
 	bool is_dead;
 };
 
@@ -70,10 +67,11 @@ struct wg_peer *wg_peer_create(struct wg_device *wg,
 			       const uint8_t public_key[NOISE_PUBLIC_KEY_LEN],
 			       const uint8_t preshared_key[NOISE_SYMMETRIC_KEY_LEN]);
 
-struct wg_peer *__must_check wg_peer_get_maybe_zero(struct wg_peer *peer);
+struct wg_peer *wg_peer_get_maybe_zero(struct wg_peer *peer);
 static inline struct wg_peer *wg_peer_get(struct wg_peer *peer)
 {
-	kref_get(&peer->refcount);
+	//kref_get(&peer->refcount);
+	panic("XXX");
 	return peer;
 }
 void wg_peer_put(struct wg_peer *peer);

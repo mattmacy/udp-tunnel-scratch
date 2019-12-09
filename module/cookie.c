@@ -42,7 +42,7 @@ precompute_key(uint8_t key[NOISE_SYMMETRIC_KEY_LEN],
 void
 wg_cookie_checker_precompute_device_keys(struct cookie_checker *checker)
 {
-	if (likely(checker->device->static_identity.has_identity)) {
+	if (__predict_true(checker->device->static_identity.has_identity)) {
 		precompute_key(checker->cookie_encryption_key,
 			       checker->device->static_identity.static_public,
 			       cookie_key_label);
@@ -207,14 +207,14 @@ wg_cookie_message_consume(struct message_handshake_cookie *src,
 	uint8_t cookie[COOKIE_LEN];
 	bool ret;
 
-	if (unlikely(!wg_index_hashtable_lookup(wg->index_hashtable,
+	if (__predict_false(!wg_index_hashtable_lookup(wg->index_hashtable,
 						INDEX_HASHTABLE_HANDSHAKE |
 						INDEX_HASHTABLE_KEYPAIR,
 						src->receiver_index, &peer)))
 		return;
 
 	down_read(&peer->latest_cookie.lock);
-	if (unlikely(!peer->latest_cookie.have_sent_mac1)) {
+	if (__predict_false(!peer->latest_cookie.have_sent_mac1)) {
 		up_read(&peer->latest_cookie.lock);
 		goto out;
 	}

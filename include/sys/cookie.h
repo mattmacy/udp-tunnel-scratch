@@ -40,13 +40,13 @@ void wg_cookie_checker_precompute_peer_keys(struct wg_peer *peer);
 void wg_cookie_init(struct cookie *cookie);
 
 enum cookie_mac_state wg_cookie_validate_packet(struct cookie_checker *checker,
-						struct sk_buff *skb,
+						struct mbuf *m,
 						bool check_cookie);
 void wg_cookie_add_mac_to_packet(void *message, size_t len,
 				 struct wg_peer *peer);
 
 void wg_cookie_message_create(struct message_handshake_cookie *src,
-			      struct sk_buff *skb, __le32 index,
+			      struct mbuf *m, uint32_t index,
 			      struct cookie_checker *checker);
 void wg_cookie_message_consume(struct message_handshake_cookie *src,
 			       struct wg_device *wg);

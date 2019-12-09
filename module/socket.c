@@ -39,7 +39,7 @@ send4(struct wg_device *wg, struct mbuf *skb,
 	rcu_read_lock_bh();
 	sock = rcu_dereference_bh(wg->sock4);
 
-	if (unlikely(!sock)) {
+	if (__predict_false(!sock)) {
 		ret = -ENONET;
 		goto err;
 	}
@@ -51,7 +51,7 @@ send4(struct wg_device *wg, struct mbuf *skb,
 
 	if (!rt) {
 		security_sk_classify_flow(sock, flowi4_to_flowi(&fl));
-		if (unlikely(!inet_confirm_addr(sock_net(sock), NULL, 0,
+		if (__predict_false(!inet_confirm_addr(sock_net(sock), NULL, 0,
 						fl.saddr, RT_SCOPE_HOST))) {
 			endpoint->src4.s_addr = 0;
 			*(__force __be32 *)&endpoint->src_if4 = 0;
@@ -60,7 +60,7 @@ send4(struct wg_device *wg, struct mbuf *skb,
 				dst_cache_reset(cache);
 		}
 		rt = ip_route_output_flow(sock_net(sock), &fl, sock);
-		if (unlikely(endpoint->src_if4 && ((IS_ERR(rt) &&
+		if (__predict_false(endpoint->src_if4 && ((IS_ERR(rt) &&
 			     PTR_ERR(rt) == -EINVAL) || (!IS_ERR(rt) &&
 			     rt->dst.dev->ifindex != endpoint->src_if4)))) {
 			endpoint->src4.s_addr = 0;
@@ -72,12 +72,12 @@ send4(struct wg_device *wg, struct mbuf *skb,
 				ip_rt_put(rt);
 			rt = ip_route_output_flow(sock_net(sock), &fl, sock);
 		}
-		if (unlikely(IS_ERR(rt))) {
+		if (__predict_false(IS_ERR(rt))) {
 			ret = PTR_ERR(rt);
 			net_dbg_ratelimited("%s: No route to %pISpfsc, error %d\n",
 					    wg->dev->name, &endpoint->addr, ret);
 			goto err;
-		} else if (unlikely(rt->dst.dev == skb->dev)) {
+		} else if (__predict_false(rt->dst.dev == skb->dev)) {
 			ip_rt_put(rt);
 			ret = -ELOOP;
 			net_dbg_ratelimited("%s: Avoiding routing loop to %pISpfsc\n",
@@ -126,7 +126,7 @@ send6(struct wg_device *wg, struct mbuf *skb,
 	rcu_read_lock_bh();
 	sock = rcu_dereference_bh(wg->sock6);
 
-	if (unlikely(!sock)) {
+	if (__predict_false(!sock)) {
 		ret = -ENONET;
 		goto err;
 	}
@@ -138,7 +138,7 @@ send6(struct wg_device *wg, struct mbuf *skb,
 
 	if (!dst) {
 		security_sk_classify_flow(sock, flowi6_to_flowi(&fl));
-		if (unlikely(!ipv6_addr_any(&fl.saddr) &&
+		if (__predict_false(!ipv6_addr_any(&fl.saddr) &&
 			     !ipv6_chk_addr(sock_net(sock), &fl.saddr, NULL, 0))) {
 			endpoint->src6 = fl.saddr = in6addr_any;
 			if (cache)
@@ -146,12 +146,12 @@ send6(struct wg_device *wg, struct mbuf *skb,
 		}
 		dst = ipv6_stub->ipv6_dst_lookup_flow(sock_net(sock), sock, &fl,
 						      NULL);
-		if (unlikely(IS_ERR(dst))) {
+		if (__predict_false(IS_ERR(dst))) {
 			ret = PTR_ERR(dst);
 			net_dbg_ratelimited("%s: No route to %pISpfsc, error %d\n",
 					    wg->dev->name, &endpoint->addr, ret);
 			goto err;
-		} else if (unlikely(dst->dev == skb->dev)) {
+		} else if (__predict_false(dst->dev == skb->dev)) {
 			dst_release(dst);
 			ret = -ELOOP;
 			net_dbg_ratelimited("%s: Avoiding routing loop to %pISpfsc\n",
@@ -174,7 +174,7 @@ out:
 	rcu_read_unlock_bh();
 	return ret;
 #else
-	return -EAFNOSUPPORT;
+	return (EAFNOSUPPORT);
 #endif
 }
 
@@ -193,7 +193,7 @@ wg_socket_send_skb_to_peer(struct wg_peer *peer, struct mbuf *skb, uint8_t ds)
 			    &peer->endpoint_cache);
 	else
 		dev_kfree_skb(skb);
-	if (likely(!ret))
+	if (__predict_true(!ret))
 		peer->tx_bytes += skb_len;
 	read_unlock_bh(&peer->endpoint_lock);
 
@@ -206,8 +206,8 @@ wg_socket_send_buffer_to_peer(struct wg_peer *peer, void *buffer,
 {
 	struct mbuf *skb = alloc_skb(len + SKB_HEADER_LEN, GFP_ATOMIC);
 
-	if (unlikely(!skb))
-		return -ENOMEM;
+	if (__predict_false(!skb))
+		return (ENOMEM);
 
 	skb_reserve(skb, SKB_HEADER_LEN);
 	skb_set_inner_network_header(skb, 0);
@@ -223,15 +223,15 @@ wg_socket_send_buffer_as_reply_to_skb(struct wg_device *wg,
 	struct mbuf *skb;
 	struct endpoint endpoint;
 
-	if (unlikely(!in_skb))
+	if (__predict_false(!in_skb))
 		return -EINVAL;
 	ret = wg_socket_endpoint_from_skb(&endpoint, in_skb);
-	if (unlikely(ret < 0))
+	if (__predict_false(ret < 0))
 		return ret;
 
 	skb = alloc_skb(len + SKB_HEADER_LEN, GFP_ATOMIC);
-	if (unlikely(!skb))
-		return -ENOMEM;
+	if (__predict_false(!skb))
+		return (ENOMEM);
 	skb_reserve(skb, SKB_HEADER_LEN);
 	skb_set_inner_network_header(skb, 0);
 	skb_put_data(skb, buffer, len);
@@ -266,7 +266,7 @@ wg_socket_endpoint_from_skb(struct endpoint *endpoint,
 			&ipv6_hdr(skb)->saddr, skb->skb_iif);
 		endpoint->src6 = ipv6_hdr(skb)->daddr;
 	} else {
-		return -EINVAL;
+		return (EINVAL);
 	}
 	return 0;
 }
@@ -284,7 +284,7 @@ endpoint_eq(const struct endpoint *a, const struct endpoint *b)
 		ipv6_addr_equal(&a->addr6.sin6_addr, &b->addr6.sin6_addr) &&
 		a->addr6.sin6_scope_id == b->addr6.sin6_scope_id &&
 		ipv6_addr_equal(&a->src6, &b->src6)) ||
-	       unlikely(!a->addr.sa_family && !b->addr.sa_family);
+	       __predict_false(!a->addr.sa_family && !b->addr.sa_family);
 }
 
 void
@@ -338,10 +338,10 @@ wg_receive(struct sock *sk, struct mbuf *skb)
 {
 	struct wg_device *wg;
 
-	if (unlikely(!sk))
+	if (__predict_false(!sk))
 		goto err;
 	wg = sk->sk_user_data;
-	if (unlikely(!wg))
+	if (__predict_false(!wg))
 		goto err;
 	wg_packet_receive(wg, skb);
 	return 0;
@@ -354,7 +354,7 @@ err:
 static void
 sock_free(struct sock *sock)
 {
-	if (unlikely(!sock))
+	if (__predict_false(!sock))
 		return;
 	sk_clear_memalloc(sock);
 	udp_tunnel_sock_release(sock->sk_socket);

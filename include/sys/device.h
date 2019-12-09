@@ -7,36 +7,39 @@
 #define _WG_DEVICE_H
 
 #include "noise.h"
-#include "allowedips.h"
+#include "whitelist.h"
 #include "peerlookup.h"
 #include "cookie.h"
 
-#include <linux/types.h>
+#include <sys/types.h>
+#if 0
 #include <linux/netdevice.h>
 #include <linux/workqueue.h>
 #include <linux/mutex.h>
 #include <linux/net.h>
 #include <linux/ptr_ring.h>
+#endif
 
 struct wg_device;
 
 struct multicore_worker {
 	void *ptr;
-	struct work_struct work;
+	//struct work_struct work;
 };
 
 struct crypt_queue {
-	struct ptr_ring ring;
+	//struct ptr_ring ring;
 	union {
 		struct {
-			struct multicore_worker __percpu *worker;
+			//struct multicore_worker __percpu *worker;
 			int last_cpu;
 		};
-		struct work_struct work;
+		//struct work_struct work;
 	};
 };
 
 struct wg_device {
+#if 0
 	struct net_device *dev;
 	struct crypt_queue encrypt_queue, decrypt_queue;
 	struct sock __rcu *sock4, *sock6;
@@ -57,6 +60,7 @@ struct wg_device {
 	u32 fwmark;
 	u16 incoming_port;
 	bool have_creating_net_ref;
+#endif
 };
 
 int wg_device_init(void);

@@ -15,7 +15,7 @@
 #include <linux/rcupdate.h>
 #include <linux/list.h>
 
-static atomic64_t peer_counter = ATOMIC64_INIT(0);
+//static atomic64_t peer_counter = ATOMIC64_INIT(0);
 
 struct wg_peer *
 wg_peer_create(struct wg_device *wg,
@@ -31,7 +31,7 @@ wg_peer_create(struct wg_device *wg,
 		return ERR_PTR(ret);
 
 	peer = kzalloc(sizeof(*peer), GFP_KERNEL);
-	if (unlikely(!peer))
+	if (__predict_false(!peer))
 		return ERR_PTR(ret);
 	peer->device = wg;
 
@@ -86,7 +86,7 @@ wg_peer_get_maybe_zero(struct wg_peer *peer)
 {
 	RCU_LOCKDEP_WARN(!rcu_read_lock_bh_held(),
 			 "Taking peer reference without holding the RCU read lock");
-	if (unlikely(!peer || !kref_get_unless_zero(&peer->refcount)))
+	if (__predict_false(!peer || !kref_get_unless_zero(&peer->refcount)))
 		return NULL;
 	return peer;
 }
@@ -172,7 +172,7 @@ peer_remove_after_dead(struct wg_peer *peer)
 void
 wg_peer_remove(struct wg_peer *peer)
 {
-	if (unlikely(!peer))
+	if (__predict_false(!peer))
 		return;
 	lockdep_assert_held(&peer->device->device_update_lock);
 
@@ -243,7 +243,7 @@ kref_release(struct kref *refcount)
 void
 wg_peer_put(struct wg_peer *peer)
 {
-	if (unlikely(!peer))
+	if (__predict_false(!peer))
 		return;
 	kref_put(&peer->refcount, kref_release);
 }

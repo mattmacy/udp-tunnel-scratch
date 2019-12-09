@@ -145,7 +145,7 @@ bool __init wg_ratelimiter_selftest(void)
 	++test;
 
 	skb4 = alloc_skb(sizeof(struct iphdr), GFP_KERNEL);
-	if (unlikely(!skb4))
+	if (__predict_false(!skb4))
 		goto err_nofree;
 	skb4->protocol = htons(ETH_P_IP);
 	hdr4 = (struct iphdr *)skb_put(skb4, sizeof(*hdr4));
@@ -155,7 +155,7 @@ bool __init wg_ratelimiter_selftest(void)
 
 #if IS_ENABLED(CONFIG_IPV6)
 	skb6 = alloc_skb(sizeof(struct ipv6hdr), GFP_KERNEL);
-	if (unlikely(!skb6)) {
+	if (__predict_false(!skb6)) {
 		kfree_skb(skb4);
 		goto err_nofree;
 	}

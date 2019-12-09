@@ -117,17 +117,17 @@ bool chacha20poly1305_encrypt_sg_inplace(struct scatterlist *src,
 			length -= l;
 		}
 
-		if (likely(length >= CHACHA20_BLOCK_SIZE || length == sl)) {
+		if (__predict_true(length >= CHACHA20_BLOCK_SIZE || length == sl)) {
 			size_t l = length;
 
-			if (unlikely(length < sl))
+			if (un__predict_true(length < sl))
 				l &= ~(CHACHA20_BLOCK_SIZE - 1);
 			chacha20(&chacha20_state, addr, addr, l, simd_context);
 			addr += l;
 			length -= l;
 		}
 
-		if (unlikely(length > 0)) {
+		if (un__predict_true(length > 0)) {
 			chacha20(&chacha20_state, b.chacha20_stream, pad0,
 				 CHACHA20_BLOCK_SIZE, simd_context);
 			crypto_xor(addr, b.chacha20_stream, length);
@@ -148,13 +148,13 @@ bool chacha20poly1305_encrypt_sg_inplace(struct scatterlist *src,
 	poly1305_update(&poly1305_state, (u8 *)b.lens, sizeof(b.lens),
 			simd_context);
 
-	if (likely(sl <= -POLY1305_MAC_SIZE))
+	if (__predict_true(sl <= -POLY1305_MAC_SIZE))
 		poly1305_final(&poly1305_state, miter.addr + miter.length + sl,
 			       simd_context);
 
 	sg_miter_stop(&miter);
 
-	if (unlikely(sl > -POLY1305_MAC_SIZE)) {
+	if (un__predict_true(sl > -POLY1305_MAC_SIZE)) {
 		poly1305_final(&poly1305_state, b.mac, simd_context);
 		scatterwalk_map_and_copy(b.mac, src, src_len, sizeof(b.mac), 1);
 	}
@@ -181,7 +181,7 @@ __chacha20poly1305_decrypt(u8 *dst, const u8 *src, const size_t src_len,
 		__le64 lens[2];
 	} b = { { 0 } };
 
-	if (unlikely(src_len < POLY1305_MAC_SIZE))
+	if (un__predict_true(src_len < POLY1305_MAC_SIZE))
 		return false;
 
 	chacha20_init(&chacha20_state, key, nonce);
@@ -206,7 +206,7 @@ __chacha20poly1305_decrypt(u8 *dst, const u8 *src, const size_t src_len,
 	poly1305_final(&poly1305_state, b.mac, simd_context);
 
 	ret = crypto_memneq(b.mac, src + dst_len, POLY1305_MAC_SIZE);
-	if (likely(!ret))
+	if (__predict_true(!ret))
 		chacha20(&chacha20_state, dst, src, dst_len, simd_context);
 
 	memzero_explicit(&chacha20_state, sizeof(chacha20_state));
@@ -253,7 +253,7 @@ bool chacha20poly1305_decrypt_sg_inplace(struct scatterlist *src,
 	} b __aligned(16) = { { 0 } };
 	bool ret = false;
 
-	if (unlikely(src_len < POLY1305_MAC_SIZE))
+	if (un__predict_true(src_len < POLY1305_MAC_SIZE))
 		return ret;
 	src_len -= POLY1305_MAC_SIZE;
 
@@ -273,7 +273,7 @@ bool chacha20poly1305_decrypt_sg_inplace(struct scatterlist *src,
 
 		poly1305_update(&poly1305_state, addr, length, simd_context);
 
-		if (unlikely(partial)) {
+		if (un__predict_true(partial)) {
 			size_t l = min(length, CHACHA20_BLOCK_SIZE - partial);
 
 			crypto_xor(addr, b.chacha20_stream + partial, l);
@@ -283,17 +283,17 @@ bool chacha20poly1305_decrypt_sg_inplace(struct scatterlist *src,
 			length -= l;
 		}
 
-		if (likely(length >= CHACHA20_BLOCK_SIZE || length == sl)) {
+		if (__predict_true(length >= CHACHA20_BLOCK_SIZE || length == sl)) {
 			size_t l = length;
 
-			if (unlikely(length < sl))
+			if (un__predict_true(length < sl))
 				l &= ~(CHACHA20_BLOCK_SIZE - 1);
 			chacha20(&chacha20_state, addr, addr, l, simd_context);
 			addr += l;
 			length -= l;
 		}
 
-		if (unlikely(length > 0)) {
+		if (un__predict_true(length > 0)) {
 			chacha20(&chacha20_state, b.chacha20_stream, pad0,
 				 CHACHA20_BLOCK_SIZE, simd_context);
 			crypto_xor(addr, b.chacha20_stream, length);
@@ -311,7 +311,7 @@ bool chacha20poly1305_decrypt_sg_inplace(struct scatterlist *src,
 	poly1305_update(&poly1305_state, (u8 *)b.lens, sizeof(b.lens),
 			simd_context);
 
-	if (likely(sl <= -POLY1305_MAC_SIZE)) {
+	if (__predict_true(sl <= -POLY1305_MAC_SIZE)) {
 		poly1305_final(&poly1305_state, b.computed_mac, simd_context);
 		ret = !crypto_memneq(b.computed_mac,
 				     miter.addr + miter.length + sl,
@@ -320,7 +320,7 @@ bool chacha20poly1305_decrypt_sg_inplace(struct scatterlist *src,
 
 	sg_miter_stop(&miter);
 
-	if (unlikely(sl > -POLY1305_MAC_SIZE)) {
+	if (un__predict_true(sl > -POLY1305_MAC_SIZE)) {
 		poly1305_final(&poly1305_state, b.computed_mac, simd_context);
 		scatterwalk_map_and_copy(b.read_mac, src, src_len,
 					 sizeof(b.read_mac), 0);

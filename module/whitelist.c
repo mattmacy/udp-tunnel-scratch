@@ -87,7 +87,7 @@ walk_remove_by_peer(struct whitelist_node __rcu **top,
 	struct whitelist_node *node, *prev;
 	unsigned int len;
 
-	if (unlikely(!peer || !REF(*top)))
+	if (__predict_false(!peer || !REF(*top)))
 		return;
 
 	for (prev = NULL, len = 0, PUSH(top); len > 0; prev = node) {
@@ -228,28 +228,28 @@ add(struct whitelist_node __rcu **trie, uint8_t bits, const uint8_t *key,
 {
 	struct whitelist_node *node, *parent, *down, *newnode;
 
-	if (unlikely(cidr > bits || !peer))
-		return -EINVAL;
+	if (__predict_false(cidr > bits || !peer))
+		return (EINVAL);
 
 	if (!rcu_access_pointer(*trie)) {
 		node = kzalloc(sizeof(*node), GFP_KERNEL);
-		if (unlikely(!node))
-			return -ENOMEM;
+		if (__predict_false(!node))
+			return (ENOMEM);
 		RCU_INIT_POINTER(node->peer, peer);
 		list_add_tail(&node->peer_list, &peer->whitelist_list);
 		copy_and_assign_cidr(node, key, cidr, bits);
 		rcu_assign_pointer(*trie, node);
-		return 0;
+		return (0);
 	}
 	if (node_placement(*trie, key, cidr, bits, &node, lock)) {
 		rcu_assign_pointer(node->peer, peer);
 		list_move_tail(&node->peer_list, &peer->whitelist_list);
-		return 0;
+		return (0);
 	}
 
 	newnode = kzalloc(sizeof(*newnode), GFP_KERNEL);
-	if (unlikely(!newnode))
-		return -ENOMEM;
+	if (__predict_false(!newnode))
+		return (ENOMEM);
 	RCU_INIT_POINTER(newnode->peer, peer);
 	list_add_tail(&newnode->peer_list, &peer->whitelist_list);
 	copy_and_assign_cidr(newnode, key, cidr, bits);
@@ -276,9 +276,9 @@ add(struct whitelist_node __rcu **trie, uint8_t bits, const uint8_t *key,
 					   newnode);
 	} else {
 		node = kzalloc(sizeof(*node), GFP_KERNEL);
-		if (unlikely(!node)) {
+		if (__predict_false(!node)) {
 			kfree(newnode);
-			return -ENOMEM;
+			return (ENOMEM);
 		}
 		INIT_LIST_HEAD(&node->peer_list);
 		copy_and_assign_cidr(node, newnode->bits, cidr, bits);

@@ -37,7 +37,7 @@ wg_packet_queue_init(struct crypt_queue *queue, work_func_t function,
 			queue->worker = wg_packet_percpu_multicore_worker_alloc(
 				function, queue);
 			if (!queue->worker)
-				return -ENOMEM;
+				return (ENOMEM);
 		} else {
 			INIT_WORK(&queue->work, function);
 		}

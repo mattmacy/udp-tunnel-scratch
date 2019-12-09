@@ -5,9 +5,9 @@
 #include <zinc/chacha20poly1305.h>
 #include <zinc/blake2s.h>
 
-#include <linux/kernel.h>
-#include <linux/param.h>
-#include <linux/skbuff.h>
+
+#include <sys/param.h>
+#include <sys/mbuf.h>
 
 enum noise_lengths {
 	NOISE_PUBLIC_KEY_LEN = CURVE25519_KEY_SIZE,
@@ -28,15 +28,15 @@ enum cookie_values {
 
 enum counter_values {
 	COUNTER_BITS_TOTAL = 2048,
-	COUNTER_REDUNDANT_BITS = BITS_PER_LONG,
+	COUNTER_REDUNDANT_BITS = __LONG_BIT,
 	COUNTER_WINDOW_SIZE = COUNTER_BITS_TOTAL - COUNTER_REDUNDANT_BITS
 };
 
 enum limits {
 	REKEY_AFTER_MESSAGES = 1ULL << 60,
-	REJECT_AFTER_MESSAGES = UINT64_T_MAX - COUNTER_WINDOW_SIZE - 1,
+	REJECT_AFTER_MESSAGES = __UQUAD_MAX - COUNTER_WINDOW_SIZE - 1,
 	REKEY_TIMEOUT = 5,
-	REKEY_TIMEOUT_JITTER_MAX_JIFFIES = HZ / 3,
+	//REKEY_TIMEOUT_JITTER_MAX_JIFFIES = HZ / 3,
 	REKEY_AFTER_TIME = 120,
 	REJECT_AFTER_TIME = 180,
 	INITIATIONS_PER_SECOND = 50,
@@ -64,7 +64,7 @@ struct message_header {
 	 * But it turns out that by encoding this as little endian,
 	 * we achieve the same thing, and it makes checking faster.
 	 */
-	__le32 type;
+	uint32_t type;
 };
 
 struct message_macs {
@@ -74,7 +74,7 @@ struct message_macs {
 
 struct message_handshake_initiation {
 	struct message_header header;
-	__le32 sender_index;
+	uint32_t sender_index;
 	uint8_t unencrypted_ephemeral[NOISE_PUBLIC_KEY_LEN];
 	uint8_t encrypted_static[noise_encrypted_len(NOISE_PUBLIC_KEY_LEN)];
 	uint8_t encrypted_timestamp[noise_encrypted_len(NOISE_TIMESTAMP_LEN)];
@@ -83,8 +83,8 @@ struct message_handshake_initiation {
 
 struct message_handshake_response {
 	struct message_header header;
-	__le32 sender_index;
-	__le32 receiver_index;
+	uint32_t sender_index;
+	uint32_t receiver_index;
 	uint8_t unencrypted_ephemeral[NOISE_PUBLIC_KEY_LEN];
 	uint8_t encrypted_nothing[noise_encrypted_len(0)];
 	struct message_macs macs;
@@ -92,15 +92,15 @@ struct message_handshake_response {
 
 struct message_handshake_cookie {
 	struct message_header header;
-	__le32 receiver_index;
+	uint32_t receiver_index;
 	uint8_t nonce[COOKIE_NONCE_LEN];
 	uint8_t encrypted_cookie[noise_encrypted_len(COOKIE_LEN)];
 };
 
 struct message_data {
 	struct message_header header;
-	__le32 key_idx;
-	__le64 counter;
+	uint32_t key_idx;
+	uint64_t counter;
 	uint8_t encrypted_data[];
 };
 

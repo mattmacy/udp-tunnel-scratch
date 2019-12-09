@@ -1,10 +1,13 @@
 #ifndef _WG_SOCKET_H
 #define _WG_SOCKET_H
 
-#include <linux/netdevice.h>
-#include <linux/udp.h>
-#include <linux/if_vlan.h>
-#include <linux/if_ether.h>
+#include_next <sys/socket.h>
+
+struct wg_device;
+struct wg_peer;
+struct sock;
+struct endpoint;
+
 
 int wg_socket_init(struct wg_device *wg, uint16_t port);
 void wg_socket_reinit(struct wg_device *wg, struct sock *new4,

@@ -77,22 +77,22 @@ wg_ratelimiter_gc_entries(struct work_struct *work)
 	for (i = 0; i < table_size; ++i) {
 		spin_lock(&table_lock);
 		hlist_for_each_entry_safe(entry, temp, &table_v4[i], hash) {
-			if (unlikely(!work) ||
+			if (__predict_false(!work) ||
 			    now - entry->last_time_ns > NSEC_PER_SEC)
 				entry_uninit(entry);
 		}
 #if IS_ENABLED(CONFIG_IPV6)
 		hlist_for_each_entry_safe(entry, temp, &table_v6[i], hash) {
-			if (unlikely(!work) ||
+			if (__predict_false(!work) ||
 			    now - entry->last_time_ns > NSEC_PER_SEC)
 				entry_uninit(entry);
 		}
 #endif
 		spin_unlock(&table_lock);
-		if (likely(work))
+		if (__predict_true(work))
 			cond_resched();
 	}
-	if (likely(work))
+	if (__predict_true(work))
 		queue_delayed_work(system_power_efficient_wq, &gc_work, HZ);
 }
 
@@ -152,7 +152,7 @@ wg_ratelimiter_allow(struct mbuf *m, struct net *net)
 		goto err_oom;
 
 	entry = kmem_cache_alloc(entry_cache, GFP_KERNEL);
-	if (unlikely(!entry))
+	if (__predict_false(!entry))
 		goto err_oom;
 
 	entry->net = net;
@@ -193,12 +193,12 @@ int wg_ratelimiter_init(void)
 	max_entries = table_size * 8;
 
 	table_v4 = kvzalloc(table_size * sizeof(*table_v4), GFP_KERNEL);
-	if (unlikely(!table_v4))
+	if (__predict_false(!table_v4))
 		goto err_kmemcache;
 
 #if IS_ENABLED(CONFIG_IPV6)
 	table_v6 = kvzalloc(table_size * sizeof(*table_v6), GFP_KERNEL);
-	if (unlikely(!table_v6)) {
+	if (__predict_false(!table_v6)) {
 		kvfree(table_v4);
 		goto err_kmemcache;
 	}
@@ -215,7 +215,7 @@ err_kmemcache:
 err:
 	--init_refcnt;
 	mutex_unlock(&init_lock);
-	return -ENOMEM;
+	return (ENOMEM);
 }
 
 void

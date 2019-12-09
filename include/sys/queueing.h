@@ -1,35 +1,32 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/*
- * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
- */
-
 #ifndef _WG_QUEUEING_H
 #define _WG_QUEUEING_H
 
-#include "peer.h"
-#include <linux/types.h>
-#include <linux/skbuff.h>
-#include <linux/ip.h>
-#include <linux/ipv6.h>
+#include <sys/peer.h>
+#include <sys/types.h>
+#include <sys/mbuf.h>
+#include <netinet/in.h>
+#include <netinet/ip.h>
+#include <netinet/ip6.h>
 
 struct wg_device;
 struct wg_peer;
 struct multicore_worker;
 struct crypt_queue;
 struct mbuf;
+struct work_struct;
 
 /* queueing.c APIs: */
 int wg_packet_queue_init(struct crypt_queue *queue, work_func_t function,
 			 bool multicore, unsigned int len);
 void wg_packet_queue_free(struct crypt_queue *queue, bool multicore);
-struct multicore_worker __percpu *
-wg_packet_percpu_multicore_worker_alloc(work_func_t function, void *ptr);
+//struct multicore_worker /* __percpu */ *
+//wg_packet_percpu_multicore_worker_alloc(work_func_t function, void *ptr);
 
 /* receive.c APIs: */
 void wg_packet_receive(struct wg_device *wg, struct mbuf *m);
 void wg_packet_handshake_receive_worker(struct work_struct *work);
 /* NAPI poll function: */
-int wg_packet_rx_poll(struct napi_struct *napi, int budget);
+//int wg_packet_rx_poll(struct napi_struct *napi, int budget);
 /* Workqueue worker: */
 void wg_packet_decrypt_worker(struct work_struct *work);
 
@@ -39,7 +36,7 @@ void wg_packet_send_queued_handshake_initiation(struct wg_peer *peer,
 void wg_packet_send_handshake_response(struct wg_peer *peer);
 void wg_packet_send_handshake_cookie(struct wg_device *wg,
 				     struct mbuf *initiating_m,
-				     __le32 sender_index);
+				     uint32_t sender_index);
 void wg_packet_send_keepalive(struct wg_peer *peer);
 void wg_packet_purge_staged_packets(struct wg_peer *peer);
 void wg_packet_send_staged_packets(struct wg_peer *peer);
@@ -57,24 +54,25 @@ enum packet_state {
 struct packet_cb {
 	uint64_t nonce;
 	struct noise_keypair *keypair;
-	atomic_t state;
+	volatile uint32_t state;
 	uint32_t mtu;
 	uint8_t ds;
 };
 
-#define PACKET_CB(m) ((struct packet_cb *)((m)->cb))
-#define PACKET_PEER(m) (PACKET_CB(m)->keypair->entry.peer)
+//#define PACKET_CB(m) ((struct packet_cb *)((m)->cb))
+//#define PACKET_PEER(m) (PACKET_CB(m)->keypair->entry.peer)
 
 /* Returns either the correct m->protocol value, or 0 if invalid. */
-static inline __be16 wg_m_examine_untrusted_ip_hdr(struct mbuf *m)
+static inline uint16_t
+wg_m_examine_untrusted_ip_hdr(struct mbuf *m)
 {
 	if (m_network_header(m) >= m->head &&
-	    (m_network_header(m) + sizeof(struct iphdr)) <=
+	    (m_network_header(m) + sizeof(struct ip)) <=
 		    m_tail_pointer(m) &&
 	    ip_hdr(m)->version == 4)
 		return htons(ETH_P_IP);
 	if (m_network_header(m) >= m->head &&
-	    (m_network_header(m) + sizeof(struct ipv6hdr)) <=
+	    (m_network_header(m) + sizeof(struct ip6_hdr)) <=
 		    m_tail_pointer(m) &&
 	    ipv6_hdr(m)->version == 6)
 		return htons(ETH_P_IPV6);
@@ -111,7 +109,7 @@ static inline int wg_cpumask_choose_online(int *stored_cpu, unsigned int id)
 {
 	unsigned int cpu = *stored_cpu, cpu_index, i;
 
-	if (unlikely(cpu == nr_cpumask_bits ||
+	if (__predict_false(cpu == nr_cpumask_bits ||
 		     !cpumask_test_cpu(cpu, cpu_online_mask))) {
 		cpu_index = id % cpumask_weight(cpu_online_mask);
 		cpu = cpumask_first(cpu_online_mask);
@@ -133,7 +131,7 @@ static inline int wg_cpumask_next_online(int *next)
 {
 	int cpu = *next;
 
-	while (unlikely(!cpumask_test_cpu(cpu, cpu_online_mask)))
+	while (__predict_false(!cpumask_test_cpu(cpu, cpu_online_mask)))
 		cpu = cpumask_next(cpu, cpu_online_mask) % nr_cpumask_bits;
 	*next = cpumask_next(cpu, cpu_online_mask) % nr_cpumask_bits;
 	return cpu;
@@ -149,13 +147,13 @@ static inline int wg_queue_enqueue_per_device_and_peer(
 	/* We first queue this up for the peer ingestion, but the consumer
 	 * will wait for the state to change to CRYPTED or DEAD before.
 	 */
-	if (unlikely(ptr_ring_produce_bh(&peer_queue->ring, m)))
+	if (__predict_false(ptr_ring_produce_bh(&peer_queue->ring, m)))
 		return -ENOSPC;
 	/* Then we queue it up in the device queue, which consumes the
 	 * packet as soon as it can.
 	 */
 	cpu = wg_cpumask_next_online(next_cpu);
-	if (unlikely(ptr_ring_produce_bh(&device_queue->ring, m)))
+	if (__predict_false(ptr_ring_produce_bh(&device_queue->ring, m)))
 		return -EPIPE;
 	queue_work_on(cpu, wq, &per_cpu_ptr(device_queue->worker, cpu)->work);
 	return 0;
@@ -186,7 +184,7 @@ static inline void wg_queue_enqueue_per_peer_napi(struct mbuf *m,
 	struct wg_peer *peer = wg_peer_get(PACKET_PEER(m));
 
 	atomic_set_release(&PACKET_CB(m)->state, state);
-	napi_schedule(&peer->napi);
+	//napi_schedule(&peer->napi);
 	wg_peer_put(peer);
 }
 

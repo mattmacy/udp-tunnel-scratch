@@ -32,7 +32,7 @@ mod_peer_timer(struct wg_peer *peer, struct timer_list *timer,
     uint64_t expires)
 {
 	rcu_read_lock_bh();
-	if (likely(netif_running(peer->device->dev) &&
+	if (__predict_true(netif_running(peer->device->dev) &&
 		   !READ_ONCE(peer->is_dead)))
 		mod_timer(timer, expires);
 	rcu_read_unlock_bh();
@@ -143,7 +143,7 @@ wg_expired_send_persistent_keepalive(struct timer_list *timer)
 	struct wg_peer *peer = from_timer(peer, timer,
 					  timer_persistent_keepalive);
 
-	if (likely(peer->persistent_keepalive_interval))
+	if (__predict_true(peer->persistent_keepalive_interval))
 		wg_packet_send_keepalive(peer);
 }
 
@@ -161,7 +161,7 @@ wg_timers_data_sent(struct wg_peer *peer)
 void
 wg_timers_data_received(struct wg_peer *peer)
 {
-	if (likely(netif_running(peer->device->dev))) {
+	if (__predict_true(netif_running(peer->device->dev))) {
 		if (!timer_pending(&peer->timer_send_keepalive))
 			mod_peer_timer(peer, &peer->timer_send_keepalive,
 				       jiffies + KEEPALIVE_TIMEOUT * HZ);

@@ -100,14 +100,14 @@ wg_xmit(struct mbuf *skb, struct net_device *dev)
 	u32 mtu;
 	int ret;
 
-	if (unlikely(wg_skb_examine_untrusted_ip_hdr(skb) != skb->protocol)) {
+	if (__predict_false(wg_skb_examine_untrusted_ip_hdr(skb) != skb->protocol)) {
 		ret = -EPROTONOSUPPORT;
 		net_dbg_ratelimited("%s: Invalid IP packet\n", dev->name);
 		goto err;
 	}
 
 	peer = wg_whitelist_lookup_dst(&wg->peer_whitelist, skb);
-	if (unlikely(!peer)) {
+	if (__predict_false(!peer)) {
 		ret = -ENOKEY;
 		if (skb->protocol == htons(ETH_P_IP))
 			net_dbg_ratelimited("%s: No peer has allowed IPs matching %pI4\n",
@@ -119,7 +119,7 @@ wg_xmit(struct mbuf *skb, struct net_device *dev)
 	}
 
 	family = READ_ONCE(peer->endpoint.addr.sa_family);
-	if (unlikely(family != AF_INET && family != AF_INET6)) {
+	if (__predict_false(family != AF_INET && family != AF_INET6)) {
 		ret = -EDESTADDRREQ;
 		net_dbg_ratelimited("%s: No valid endpoint has been configured or discovered for peer %llu\n",
 				    dev->name, peer->internal_id);
@@ -134,7 +134,7 @@ wg_xmit(struct mbuf *skb, struct net_device *dev)
 	} else {
 		struct mbuf *segs = skb_gso_segment(skb, 0);
 
-		if (unlikely(IS_ERR(segs))) {
+		if (__predict_false(IS_ERR(segs))) {
 			ret = PTR_ERR(segs);
 			goto err_peer;
 		}
@@ -146,7 +146,7 @@ wg_xmit(struct mbuf *skb, struct net_device *dev)
 		skb_mark_not_on_list(skb);
 
 		skb = skb_share_check(skb, GFP_ATOMIC);
-		if (unlikely(!skb))
+		if (__predict_false(!skb))
 			continue;
 
 		/* We only need to keep the original dst around for icmp,
