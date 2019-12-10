@@ -1,23 +1,35 @@
-#include "cookie.h"
-#include "peer.h"
-#include "device.h"
-#include "messages.h"
-#include "ratelimiter.h"
-#include "timers.h"
+#include <sys/types.h>
+#include <sys/sx.h>
+#include <sys/libkern.h>
+#include <sys/endian.h>
+
+#include <sys/cookie.h>
+#include <sys/socket.h>
+#include <sys/peer.h>
+#include <sys/device.h>
+#include <sys/messages.h>
+#include <sys/ratelimiter.h>
+#include <sys/timers.h>
 
 #include <zinc/blake2s.h>
 #include <zinc/chacha20poly1305.h>
 
-#include <net/ipv6.h>
-#include <crypto/algapi.h>
+#include <netinet/in.h>
+#include <netinet/ip.h>
+#include <netinet/ip6.h>
+#include <net/ethernet.h>
+//#include <crypto/algapi.h>
+
+
+#define crypto_memneq(a, b, len) (memcmp(a, b, len) != 0)
 
 void
 wg_cookie_checker_init(struct cookie_checker *checker,
 			    struct wg_device *wg)
 {
-	sx_init&checker->secret_lock);(
-	checker->secret_birthdate = ktime_get_coarse_boottime_ns();
-	get_random_bytes(checker->secret, NOISE_HASH_LEN);
+	sx_init(&checker->secret_lock, "secret lock");
+	checker->secret_birthdate = gethrtime();
+	arc4random_buf(checker->secret, NOISE_HASH_LEN);
 	checker->device = wg;
 }
 
@@ -69,7 +81,7 @@ void
 wg_cookie_init(struct cookie *cookie)
 {
 	memset(cookie, 0, sizeof(*cookie));
-	init_rwsem(&cookie->lock);
+	sx_init(&cookie->lock, "cookie lock");
 }
 
 static void
@@ -98,25 +110,25 @@ make_cookie(uint8_t cookie[COOKIE_LEN], struct mbuf *m,
 
 	if (wg_birthdate_has_expired(checker->secret_birthdate,
 				     COOKIE_SECRET_MAX_AGE)) {
-		down_write(&checker->secret_lock);
-		checker->secret_birthdate = ktime_get_coarse_boottime_ns();
-		get_random_bytes(checker->secret, NOISE_HASH_LEN);
-		up_write(&checker->secret_lock);
+		sx_xlock(&checker->secret_lock);
+		checker->secret_birthdate = gethrtime();
+		arc4random_buf(checker->secret, NOISE_HASH_LEN);
+		sx_xunlock(&checker->secret_lock);
 	}
 
-	down_read(&checker->secret_lock);
+	sx_slock(&checker->secret_lock);
 
 	blake2s_init_key(&state, COOKIE_LEN, checker->secret, NOISE_HASH_LEN);
-	if (m->protocol == htons(ETH_P_IP))
+	if (m->protocol == htons(ETHERTYPE_IP))
 		blake2s_update(&state, (uint8_t *)&ip_hdr(m)->saddr,
 			       sizeof(struct in_addr));
-	else if (m->protocol == htons(ETH_P_IPV6))
+	else if (m->protocol == htons(ETHERTYPE_IPV6))
 		blake2s_update(&state, (uint8_t *)&ipv6_hdr(m)->saddr,
 			       sizeof(struct in6_addr));
-	blake2s_update(&state, (uint8_t *)&udp_hdr(m)->source, sizeof(__be16));
+	blake2s_update(&state, (uint8_t *)&udp_hdr(m)->source, sizeof(uint16_t));
 	blake2s_final(&state, cookie);
 
-	up_read(&checker->secret_lock);
+	sx_sunlock(&checker->secret_lock);
 }
 
 enum cookie_mac_state
@@ -124,36 +136,37 @@ wg_cookie_validate_packet(struct cookie_checker *checker,
     struct mbuf *m, bool check_cookie)
 {
 	struct message_macs *macs = (struct message_macs *)
-		(m->data + m->len - sizeof(*macs));
-	enum cookie_mac_state ret;
+		(m->m_data + m->m_len - sizeof(*macs));
+	enum cookie_mac_state state;
 	uint8_t computed_mac[COOKIE_LEN];
 	uint8_t cookie[COOKIE_LEN];
 
-	ret = INVALID_MAC;
-	compute_mac1(computed_mac, m->data, m->len,
+	state = INVALID_MAC;
+	compute_mac1(computed_mac, m->m_data, m->m_len,
 		     checker->message_mac1_key);
 	if (crypto_memneq(computed_mac, macs->mac1, COOKIE_LEN))
 		goto out;
 
-	ret = VALID_MAC_BUT_NO_COOKIE;
+	state = VALID_MAC_BUT_NO_COOKIE;
 
 	if (!check_cookie)
 		goto out;
 
 	make_cookie(cookie, m, checker);
 
-	compute_mac2(computed_mac, m->data, m->len, cookie);
+	compute_mac2(computed_mac, m->m_data, m->m_len, cookie);
 	if (crypto_memneq(computed_mac, macs->mac2, COOKIE_LEN))
 		goto out;
 
-	ret = VALID_MAC_WITH_COOKIE_BUT_RATELIMITED;
+	state = VALID_MAC_WITH_COOKIE_BUT_RATELIMITED;
+#ifdef notyet
 	if (!wg_ratelimiter_allow(m, dev_net(checker->device->dev)))
 		goto out;
-
-	ret = VALID_MAC_WITH_COOKIE;
+#endif
+	state = VALID_MAC_WITH_COOKIE;
 
 out:
-	return ret;
+	return (state);
 }
 
 void
@@ -163,14 +176,14 @@ wg_cookie_add_mac_to_packet(void *message, size_t len,
 	struct message_macs *macs = (struct message_macs *)
 		((uint8_t *)message + len - sizeof(*macs));
 
-	down_write(&peer->latest_cookie.lock);
+	sx_xlock(&peer->latest_cookie.lock);
 	compute_mac1(macs->mac1, message, len,
 		     peer->latest_cookie.message_mac1_key);
 	memcpy(peer->latest_cookie.last_mac1_sent, macs->mac1, COOKIE_LEN);
 	peer->latest_cookie.have_sent_mac1 = true;
-	up_write(&peer->latest_cookie.lock);
+	sx_xunlock(&peer->latest_cookie.lock);
 
-	down_read(&peer->latest_cookie.lock);
+	sx_slock(&peer->latest_cookie.lock);
 	if (peer->latest_cookie.is_valid &&
 	    !wg_birthdate_has_expired(peer->latest_cookie.birthdate,
 				COOKIE_SECRET_MAX_AGE - COOKIE_SECRET_LATENCY))
@@ -178,20 +191,20 @@ wg_cookie_add_mac_to_packet(void *message, size_t len,
 			     peer->latest_cookie.cookie);
 	else
 		memset(macs->mac2, 0, COOKIE_LEN);
-	up_read(&peer->latest_cookie.lock);
+	sx_sunlock(&peer->latest_cookie.lock);
 }
 
 void
 wg_cookie_message_create(struct message_handshake_cookie *dst,
-    struct mbuf *m, __le32 index, struct cookie_checker *checker)
+    struct mbuf *m, uint32_t index, struct cookie_checker *checker)
 {
 	struct message_macs *macs = (struct message_macs *)
-		((uint8_t *)m->data + m->len - sizeof(*macs));
+		((uint8_t *)m->m_data + m->m_len - sizeof(*macs));
 	uint8_t cookie[COOKIE_LEN];
 
-	dst->header.type = cpu_to_le32(MESSAGE_HANDSHAKE_COOKIE);
+	dst->header.type = htole32(MESSAGE_HANDSHAKE_COOKIE);
 	dst->receiver_index = index;
-	get_random_bytes_wait(dst->nonce, COOKIE_NONCE_LEN);
+	arc4random_buf(dst->nonce, COOKIE_NONCE_LEN);
 
 	make_cookie(cookie, m, checker);
 	xchacha20poly1305_encrypt(dst->encrypted_cookie, cookie, COOKIE_LEN,
@@ -205,7 +218,7 @@ wg_cookie_message_consume(struct message_handshake_cookie *src,
 {
 	struct wg_peer *peer = NULL;
 	uint8_t cookie[COOKIE_LEN];
-	bool ret;
+	bool rc;
 
 	if (__predict_false(!wg_index_hashtable_lookup(wg->index_hashtable,
 						INDEX_HASHTABLE_HANDSHAKE |
@@ -213,27 +226,29 @@ wg_cookie_message_consume(struct message_handshake_cookie *src,
 						src->receiver_index, &peer)))
 		return;
 
-	down_read(&peer->latest_cookie.lock);
+	sx_slock(&peer->latest_cookie.lock);
 	if (__predict_false(!peer->latest_cookie.have_sent_mac1)) {
-		up_read(&peer->latest_cookie.lock);
+		sx_sunlock(&peer->latest_cookie.lock);
 		goto out;
 	}
-	ret = xchacha20poly1305_decrypt(
+	rc = xchacha20poly1305_decrypt(
 		cookie, src->encrypted_cookie, sizeof(src->encrypted_cookie),
 		peer->latest_cookie.last_mac1_sent, COOKIE_LEN, src->nonce,
 		peer->latest_cookie.cookie_decryption_key);
-	up_read(&peer->latest_cookie.lock);
+	sx_sunlock(&peer->latest_cookie.lock);
 
-	if (ret) {
-		down_write(&peer->latest_cookie.lock);
+	if (rc) {
+		sx_xlock(&peer->latest_cookie.lock);
 		memcpy(peer->latest_cookie.cookie, cookie, COOKIE_LEN);
-		peer->latest_cookie.birthdate = ktime_get_coarse_boottime_ns();
+		peer->latest_cookie.birthdate = gethrtime();
 		peer->latest_cookie.is_valid = true;
 		peer->latest_cookie.have_sent_mac1 = false;
-		up_write(&peer->latest_cookie.lock);
+		sx_xunlock(&peer->latest_cookie.lock);
 	} else {
+#ifdef notyet
 		net_dbg_ratelimited("%s: Could not decrypt invalid cookie response\n",
 				    wg->dev->name);
+#endif
 	}
 
 out:

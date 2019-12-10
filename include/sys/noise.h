@@ -3,6 +3,7 @@
 
 #include <sys/messages.h>
 #include <sys/peerlookup.h>
+#include <sys/timers.h>
 
 #include <sys/types.h>
 #include <sys/timex.h>
@@ -13,17 +14,6 @@
 #include <linux/mutex.h>
 #include <linux/kref.h>
 #endif
-
-static __inline uint64_t
-gethrtime(void) {
-
-	struct timespec ts;
-	uint64_t nsec;
-
-	getnanouptime(&ts);
-	nsec = (uint64_t)ts.tv_sec * NANOSECOND + ts.tv_nsec;
-	return (nsec);
-}
 
 union noise_counter {
 	struct {

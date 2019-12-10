@@ -6,6 +6,8 @@
 #ifndef _WG_PEER_H
 #define _WG_PEER_H
 
+#include <sys/lock.h>
+#include <sys/rwlock.h>
 #include <sys/device.h>
 #include <sys/noise.h>
 #include <sys/cookie.h>
