@@ -1,8 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/*
- * Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
- */
-
 #ifndef _WG_TIMERS_H
 #define _WG_TIMERS_H
 
@@ -20,7 +15,6 @@ gethrtime(void) {
 	return (nsec);
 }
 
-
 struct wg_peer;
 
 void wg_timers_init(struct wg_peer *peer);
@@ -34,8 +28,8 @@ void wg_timers_handshake_complete(struct wg_peer *peer);
 void wg_timers_session_derived(struct wg_peer *peer);
 void wg_timers_any_authenticated_packet_traversal(struct wg_peer *peer);
 
-static inline bool wg_birthdate_has_expired(uint64_t birthday_nanoseconds,
-					    uint64_t expiration_seconds)
+static inline bool
+wg_birthdate_has_expired(uint64_t birthday_ns, uint64_t expiration_s)
 {
 	return (int64_t)(birthday_nanoseconds + expiration_seconds * NANOSECOND)
 		<= (int64_t)gethrtime();
