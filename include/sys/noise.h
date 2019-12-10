@@ -14,6 +14,17 @@
 #include <linux/kref.h>
 #endif
 
+static __inline uint64_t
+gethrtime(void) {
+
+	struct timespec ts;
+	uint64_t nsec;
+
+	getnanouptime(&ts);
+	nsec = (uint64_t)ts.tv_sec * NANOSECOND + ts.tv_nsec;
+	return (nsec);
+}
+
 union noise_counter {
 	struct {
 		uint64_t counter;
@@ -102,7 +113,7 @@ bool wg_noise_handshake_init(struct noise_handshake *handshake,
 void wg_noise_handshake_clear(struct noise_handshake *handshake);
 static inline void wg_noise_reset_last_sent_handshake(volatile uint64_t *handshake_ns)
 {
-	atomic_store_rel_64(handshake_ns, getnanouptime() -
+	atomic_store_rel_64(handshake_ns, gethrtime() -
 				       (uint64_t)(REKEY_TIMEOUT + 1) * NANOSECOND);
 }
 

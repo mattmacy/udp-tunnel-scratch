@@ -51,9 +51,7 @@ __FBSDID("$FreeBSD$");
 
 #include <sys/device.h>
 #include <sys/noise.h>
-#include <sys/queueing.h>
 #include <sys/ratelimiter.h>
-//#include "netlink.h"
 #include <crypto/zinc.h>
 
 
