@@ -31,7 +31,7 @@ void wg_timers_any_authenticated_packet_traversal(struct wg_peer *peer);
 static inline bool
 wg_birthdate_has_expired(uint64_t birthday_ns, uint64_t expiration_s)
 {
-	return (int64_t)(birthday_nanoseconds + expiration_seconds * NANOSECOND)
+	return (int64_t)(birthday_ns + expiration_s * NANOSECOND)
 		<= (int64_t)gethrtime();
 }
 

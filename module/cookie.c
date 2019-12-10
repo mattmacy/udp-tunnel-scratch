@@ -18,10 +18,6 @@
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
 #include <net/ethernet.h>
-//#include <crypto/algapi.h>
-
-
-#define crypto_memneq(a, b, len) (memcmp(a, b, len) != 0)
 
 void
 wg_cookie_checker_init(struct cookie_checker *checker,
@@ -107,6 +103,7 @@ make_cookie(uint8_t cookie[COOKIE_LEN], struct mbuf *m,
     struct cookie_checker *checker)
 {
 	struct blake2s_state state;
+	uint16_t ether_type;
 
 	if (wg_birthdate_has_expired(checker->secret_birthdate,
 				     COOKIE_SECRET_MAX_AGE)) {
@@ -119,10 +116,11 @@ make_cookie(uint8_t cookie[COOKIE_LEN], struct mbuf *m,
 	sx_slock(&checker->secret_lock);
 
 	blake2s_init_key(&state, COOKIE_LEN, checker->secret, NOISE_HASH_LEN);
-	if (m->protocol == htons(ETHERTYPE_IP))
+	ether_type = mtod(m, struct ether_header *)->ether_type;
+	if (ether_type == htons(ETHERTYPE_IP))
 		blake2s_update(&state, (uint8_t *)&ip_hdr(m)->saddr,
 			       sizeof(struct in_addr));
-	else if (m->protocol == htons(ETHERTYPE_IPV6))
+	else if (ether_type == htons(ETHERTYPE_IPV6))
 		blake2s_update(&state, (uint8_t *)&ipv6_hdr(m)->saddr,
 			       sizeof(struct in6_addr));
 	blake2s_update(&state, (uint8_t *)&udp_hdr(m)->source, sizeof(uint16_t));
@@ -144,7 +142,7 @@ wg_cookie_validate_packet(struct cookie_checker *checker,
 	state = INVALID_MAC;
 	compute_mac1(computed_mac, m->m_data, m->m_len,
 		     checker->message_mac1_key);
-	if (crypto_memneq(computed_mac, macs->mac1, COOKIE_LEN))
+	if (timingsafe_bcmp(computed_mac, macs->mac1, COOKIE_LEN))
 		goto out;
 
 	state = VALID_MAC_BUT_NO_COOKIE;
@@ -155,7 +153,7 @@ wg_cookie_validate_packet(struct cookie_checker *checker,
 	make_cookie(cookie, m, checker);
 
 	compute_mac2(computed_mac, m->m_data, m->m_len, cookie);
-	if (crypto_memneq(computed_mac, macs->mac2, COOKIE_LEN))
+	if (timingsafe_bcmp(computed_mac, macs->mac2, COOKIE_LEN))
 		goto out;
 
 	state = VALID_MAC_WITH_COOKIE_BUT_RATELIMITED;
