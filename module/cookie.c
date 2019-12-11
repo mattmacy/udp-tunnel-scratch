@@ -3,6 +3,7 @@
 #include <sys/libkern.h>
 #include <sys/endian.h>
 
+#include <sys/netmacros.h>
 #include <sys/cookie.h>
 #include <sys/socket.h>
 #include <sys/peer.h>
@@ -116,14 +117,14 @@ make_cookie(uint8_t cookie[COOKIE_LEN], struct mbuf *m,
 	sx_slock(&checker->secret_lock);
 
 	blake2s_init_key(&state, COOKIE_LEN, checker->secret, NOISE_HASH_LEN);
-	ether_type = mtod(m, struct ether_header *)->ether_type;
-	if (ether_type == htons(ETHERTYPE_IP))
-		blake2s_update(&state, (uint8_t *)&ip_hdr(m)->saddr,
+	ether_type = eh_type(m);
+	if (ether_type == ETHERTYPE_IP)
+		blake2s_update(&state, (uint8_t *)&ip_hdr(m)->ip_src,
 			       sizeof(struct in_addr));
-	else if (ether_type == htons(ETHERTYPE_IPV6))
-		blake2s_update(&state, (uint8_t *)&ipv6_hdr(m)->saddr,
+	else if (ether_type == ETHERTYPE_IPV6)
+		blake2s_update(&state, (uint8_t *)&ip6_hdr(m)->ip6_src,
 			       sizeof(struct in6_addr));
-	blake2s_update(&state, (uint8_t *)&udp_hdr(m)->source, sizeof(uint16_t));
+	blake2s_update(&state, (uint8_t *)&udp_hdr(m)->uh_sport, sizeof(uint16_t));
 	blake2s_final(&state, cookie);
 
 	sx_sunlock(&checker->secret_lock);
