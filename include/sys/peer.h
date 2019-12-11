@@ -38,7 +38,7 @@ struct wg_peer {
 	//struct dst_cache endpoint_cache;
 	struct rwlock endpoint_lock;
 	struct noise_handshake handshake;
-	//atomic64_t last_sent_handshake;
+	volatile uint64_t last_sent_handshake;
 	//struct work_struct transmit_handshake_work, clear_peer_work;
 	struct cookie latest_cookie;
 	//struct hlist_node pubkey_hash;
@@ -51,8 +51,8 @@ struct wg_peer {
 	bool timer_need_another_keepalive;
 	bool sent_lastminute_handshake;
 	struct timespec walltime_last_handshake;
-	//struct kref refcount;
-	//struct rcu_head rcu;
+	volatile uint32_t wp_refcount;
+	struct epoch_context wp_epoch_ctx;
 	//struct list_head peer_list;
 	//struct list_head allowedips_list;
 	uint64_t internal_id;

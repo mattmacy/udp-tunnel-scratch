@@ -16,7 +16,7 @@ bool curve25519(uint8_t mypublic[CURVE25519_KEY_SIZE],
 			     const uint8_t secret[CURVE25519_KEY_SIZE],
 			     const uint8_t basepoint[CURVE25519_KEY_SIZE]);
 void curve25519_generate_secret(uint8_t secret[CURVE25519_KEY_SIZE]);
-bool urve25519_generate_public(
+bool curve25519_generate_public(
 	uint8_t pub[CURVE25519_KEY_SIZE], const uint8_t secret[CURVE25519_KEY_SIZE]);
 
 static inline void curve25519_clamp_secret(uint8_t secret[CURVE25519_KEY_SIZE])

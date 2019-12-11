@@ -23,7 +23,7 @@ wg_packet_send_handshake_initiation(struct wg_peer *peer)
 				      REKEY_TIMEOUT))
 		return; /* This function is rate limited. */
 
-	atomic64_set(&peer->last_sent_handshake, ktime_get_coarse_boottime_ns());
+	atomic_store_rel_64(&peer->last_sent_handshake, gethrtime());
 	net_dbg_ratelimited("%s: Sending handshake initiation to peer %llu (%pISpfsc)\n",
 			    peer->device->dev->name, peer->internal_id,
 			    &peer->endpoint.addr);
@@ -32,8 +32,8 @@ wg_packet_send_handshake_initiation(struct wg_peer *peer)
 		wg_cookie_add_mac_to_packet(&packet, sizeof(packet), peer);
 		wg_timers_any_authenticated_packet_traversal(peer);
 		wg_timers_any_authenticated_packet_sent(peer);
-		atomic64_set(&peer->last_sent_handshake,
-			     ktime_get_coarse_boottime_ns());
+		atomic_store_rel_64(&peer->last_sent_handshake,
+			     gethrtime());
 		wg_socket_send_buffer_to_peer(peer, &packet, sizeof(packet),
 					      HANDSHAKE_DSCP);
 		wg_timers_handshake_initiated(peer);
@@ -86,7 +86,7 @@ wg_packet_send_handshake_response(struct wg_peer *peer)
 {
 	struct message_handshake_response packet;
 
-	atomic64_set(&peer->last_sent_handshake, ktime_get_coarse_boottime_ns());
+	atomic_store_rel_64(&peer->last_sent_handshake, gethrtime());
 	net_dbg_ratelimited("%s: Sending handshake response to peer %llu (%pISpfsc)\n",
 			    peer->device->dev->name, peer->internal_id,
 			    &peer->endpoint.addr);
@@ -98,8 +98,8 @@ wg_packet_send_handshake_response(struct wg_peer *peer)
 			wg_timers_session_derived(peer);
 			wg_timers_any_authenticated_packet_traversal(peer);
 			wg_timers_any_authenticated_packet_sent(peer);
-			atomic64_set(&peer->last_sent_handshake,
-				     ktime_get_coarse_boottime_ns());
+			atomic_store_rel_64(&peer->last_sent_handshake,
+				     gethrtime());
 			wg_socket_send_buffer_to_peer(peer, &packet,
 						      sizeof(packet),
 						      HANDSHAKE_DSCP);
@@ -130,7 +130,7 @@ keep_key_fresh(struct wg_peer *peer)
 	rcu_read_lock_bh();
 	keypair = rcu_dereference_bh(peer->keypairs.current_keypair);
 	if (__predict_true(keypair && READ_ONCE(keypair->sending.is_valid)) &&
-	    (__predict_false(atomic64_read(&keypair->sending.counter.counter) >
+	    (__predict_false(atomic64_read(&keypair->sending.nc_counter) >
 		      REKEY_AFTER_MESSAGES) ||
 	     (keypair->i_am_the_initiator &&
 	      __predict_false(wg_birthdate_has_expired(keypair->sending.birthdate,

@@ -52,7 +52,7 @@ entry_uninit(struct ratelimiter_entry *entry)
 static void
 wg_ratelimiter_gc_entries(struct work_struct *work)
 {
-	const uint64_t now = ktime_get_coarse_boottime_ns();
+	const uint64_t now = gethrtime();
 	struct ratelimiter_entry *entry;
 	struct hlist_node *temp;
 	unsigned int i;
@@ -117,7 +117,7 @@ wg_ratelimiter_allow(struct mbuf *m, struct net *net)
 			 * as part of the rate.
 			 */
 			spin_lock(&entry->lock);
-			now = ktime_get_coarse_boottime_ns();
+			now = gethrtime();
 			tokens = min_t(uint64_t, TOKEN_MAX,
 				       entry->tokens + now -
 					       entry->last_time_ns);
@@ -142,7 +142,7 @@ wg_ratelimiter_allow(struct mbuf *m, struct net *net)
 	entry->ip = ip;
 	INIT_HLIST_NODE(&entry->hash);
 	spin_lock_init(&entry->lock);
-	entry->last_time_ns = ktime_get_coarse_boottime_ns();
+	entry->last_time_ns = gethrtime();
 	entry->tokens = TOKEN_MAX - PACKET_COST;
 	spin_lock(&table_lock);
 	hlist_add_head_rcu(&entry->hash, bucket);

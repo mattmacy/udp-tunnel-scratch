@@ -201,7 +201,7 @@ wg_timers_handshake_complete(struct wg_peer *peer)
 	del_timer(&peer->timer_retransmit_handshake);
 	peer->timer_handshake_attempts = 0;
 	peer->sent_lastminute_handshake = false;
-	ktime_get_real_ts64(&peer->walltime_last_handshake);
+	nanotime(&peer->walltime_last_handshake);
 }
 
 /* Should be called after an ephemeral key is created, which is before sending a

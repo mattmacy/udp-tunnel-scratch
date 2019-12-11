@@ -1,17 +1,33 @@
-#include "noise.h"
-#include "device.h"
-#include "peer.h"
-#include "messages.h"
-#include "queueing.h"
-#include "peerlookup.h"
+#include <sys/types.h>
+#include <sys/param.h>
+#include <sys/cdefs.h>
+#include <sys/systm.h>
+#include <machine/atomic.h>
+#include <sys/libkern.h>
+#include <sys/lock.h>
+#include <sys/mutex.h>
+#include <sys/sx.h>
+#include <sys/endian.h>
+#include <sys/random.h>
+#include <sys/kernel.h>
 
+#include <sys/noise.h>
+#include <sys/device.h>
+#include <sys/socket.h>
+#include <sys/peer.h>
+#include <sys/messages.h>
+#include <sys/wg_module.h>
+//#include "queueing.h"
+#include <sys/peerlookup.h>
+
+#if 0
 #include <linux/rcupdate.h>
 #include <linux/slab.h>
 #include <linux/bitmap.h>
 #include <linux/scatterlist.h>
 #include <linux/highmem.h>
 #include <crypto/algapi.h>
-
+#endif
 /* This implements Noise_IKpsk2:
  *
  * <- s
@@ -20,13 +36,18 @@
  * <- e, ee, se, psk, {}
  */
 
-static const uint8_t handshake_name[37] = "Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s";
-static const uint8_t identifier_name[34] = "WireGuard v1 zx2c4 Jason@zx2c4.com";
-static uint8_t handshake_init_hash[NOISE_HASH_LEN] __ro_after_init;
-static uint8_t handshake_init_chaining_key[NOISE_HASH_LEN] __ro_after_init;
-//static atomic64_t keypair_counter = ATOMIC64_INIT(0);
+#define net_dbg_ratelimited(...)
+CTASSERT(sizeof(char) == sizeof(bool));
 
-void __init wg_noise_init(void)
+static const uint8_t handshake_name[37] = "Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s";
+static const uint8_t identifier_name[30] = "WireGuard v1 FreeBSD.org";
+static __read_mostly uint8_t handshake_init_hash[NOISE_HASH_LEN];
+static __read_mostly uint8_t handshake_init_chaining_key[NOISE_HASH_LEN];
+//static atomic64_t keypair_counter = ATOMIC64_INIT(0);
+static volatile uint64_t keypair_counter = 0;
+
+void
+wg_noise_init(void)
 {
 	struct blake2s_state blake;
 
@@ -39,31 +60,33 @@ void __init wg_noise_init(void)
 }
 
 /* Must hold peer->handshake.static_identity->lock */
-bool wg_noise_precompute_static_static(struct wg_peer *peer)
+bool
+wg_noise_precompute_static_static(struct wg_peer *peer)
 {
-	bool ret = true;
+	bool rc = true;
 
-	down_write(&peer->handshake.lock);
+	sx_xlock(&peer->handshake.nh_lock);
 	if (peer->handshake.static_identity->has_identity)
-		ret = curve25519(
+		rc = curve25519(
 			peer->handshake.precomputed_static_static,
 			peer->handshake.static_identity->static_private,
 			peer->handshake.remote_static);
 	else
 		memset(peer->handshake.precomputed_static_static, 0,
 		       NOISE_PUBLIC_KEY_LEN);
-	up_write(&peer->handshake.lock);
-	return ret;
+	sx_xunlock(&peer->handshake.nh_lock);
+	return (rc);
 }
 
-bool wg_noise_handshake_init(struct noise_handshake *handshake,
-			   struct noise_static_identity *static_identity,
-			   const uint8_t peer_public_key[NOISE_PUBLIC_KEY_LEN],
-			   const uint8_t peer_preshared_key[NOISE_SYMMETRIC_KEY_LEN],
-			   struct wg_peer *peer)
+bool
+wg_noise_handshake_init(struct noise_handshake *handshake,
+    struct noise_static_identity *static_identity,
+    const uint8_t peer_public_key[NOISE_PUBLIC_KEY_LEN],
+    const uint8_t peer_preshared_key[NOISE_SYMMETRIC_KEY_LEN],
+    struct wg_peer *peer)
 {
 	memset(handshake, 0, sizeof(*handshake));
-	init_rwsem(&handshake->lock);
+	sx_init(&handshake->nh_lock, "handshake lock");
 	handshake->entry.type = INDEX_HASHTABLE_HANDSHAKE;
 	handshake->entry.peer = peer;
 	memcpy(handshake->remote_static, peer_public_key, NOISE_PUBLIC_KEY_LEN);
@@ -72,10 +95,11 @@ bool wg_noise_handshake_init(struct noise_handshake *handshake,
 		       NOISE_SYMMETRIC_KEY_LEN);
 	handshake->static_identity = static_identity;
 	handshake->state = HANDSHAKE_ZEROED;
-	return wg_noise_precompute_static_static(peer);
+	return (wg_noise_precompute_static_static(peer));
 }
 
-static void handshake_zero(struct noise_handshake *handshake)
+static void
+handshake_zero(struct noise_handshake *handshake)
 {
 	memset(&handshake->ephemeral_private, 0, NOISE_PUBLIC_KEY_LEN);
 	memset(&handshake->remote_ephemeral, 0, NOISE_PUBLIC_KEY_LEN);
@@ -85,52 +109,58 @@ static void handshake_zero(struct noise_handshake *handshake)
 	handshake->state = HANDSHAKE_ZEROED;
 }
 
-void wg_noise_handshake_clear(struct noise_handshake *handshake)
+void
+wg_noise_handshake_clear(struct noise_handshake *handshake)
 {
 	wg_index_hashtable_remove(
 			handshake->entry.peer->device->index_hashtable,
 			&handshake->entry);
-	down_write(&handshake->lock);
+	sx_xlock(&handshake->nh_lock);
 	handshake_zero(handshake);
-	up_write(&handshake->lock);
+	sx_xunlock(&handshake->nh_lock);
 	wg_index_hashtable_remove(
 			handshake->entry.peer->device->index_hashtable,
 			&handshake->entry);
 }
 
-static struct noise_keypair *keypair_create(struct wg_peer *peer)
+static struct noise_keypair *
+keypair_create(struct wg_peer *peer)
 {
-	struct noise_keypair *keypair = kzalloc(sizeof(*keypair), GFP_KERNEL);
+	struct noise_keypair *keypair;
 
+	keypair = malloc(sizeof(*keypair), M_WG, M_NOWAIT|M_ZERO);
 	if (__predict_false(!keypair))
-		return NULL;
-	keypair->internal_id = atomic64_inc_return(&keypair_counter);
+		return (NULL);
+	keypair->internal_id = atomic_fetchadd_64(&keypair_counter, 1) + 1;
 	keypair->entry.type = INDEX_HASHTABLE_KEYPAIR;
 	keypair->entry.peer = peer;
-	kref_init(&keypair->refcount);
-	return keypair;
+	refcount_init(&keypair->nk_refcount, 0);
+	return (keypair);
 }
 
-static void keypair_free_rcu(struct rcu_head *rcu)
+static void
+keypair_free_deferred(epoch_context_t ctx)
 {
-	kzfree(container_of(rcu, struct noise_keypair, rcu));
+	struct noise_keypair *nk;
+
+	nk = __containerof(ctx, struct noise_keypair, nk_epoch_ctx);
+	free(nk, M_WG);
 }
 
-static void keypair_free_kref(struct kref *kref)
+static void
+noise_keypair_put_(struct noise_keypair *keypair)
 {
-	struct noise_keypair *keypair =
-		container_of(kref, struct noise_keypair, refcount);
-
 	net_dbg_ratelimited("%s: Keypair %llu destroyed for peer %llu\n",
 			    keypair->entry.peer->device->dev->name,
 			    keypair->internal_id,
 			    keypair->entry.peer->internal_id);
 	wg_index_hashtable_remove(keypair->entry.peer->device->index_hashtable,
 				  &keypair->entry);
-	call_rcu(&keypair->rcu, keypair_free_rcu);
+	epoch_call(net_epoch, &keypair->nk_epoch_ctx, keypair_free_deferred);
 }
 
-void wg_noise_keypair_put(struct noise_keypair *keypair, bool unreference_now)
+void
+wg_noise_keypair_put(struct noise_keypair *keypair, bool unreference_now)
 {
 	if (__predict_false(!keypair))
 		return;
@@ -138,77 +168,72 @@ void wg_noise_keypair_put(struct noise_keypair *keypair, bool unreference_now)
 		wg_index_hashtable_remove(
 			keypair->entry.peer->device->index_hashtable,
 			&keypair->entry);
-	kref_put(&keypair->refcount, keypair_free_kref);
+	if (refcount_release(&keypair->nk_refcount))
+		noise_keypair_put_(keypair);
 }
 
-struct noise_keypair *wg_noise_keypair_get(struct noise_keypair *keypair)
+struct noise_keypair *
+wg_noise_keypair_get(struct noise_keypair *keypair)
 {
+#if 0
 	RCU_LOCKDEP_WARN(!rcu_read_lock_bh_held(),
 		"Taking noise keypair reference without holding the RCU BH read lock");
-	if (__predict_false(!keypair || !kref_get_unless_zero(&keypair->refcount)))
-		return NULL;
-	return keypair;
+#endif
+	if (__predict_false(!keypair || !refcount_acquire_if_not_zero(&keypair->nk_refcount)))
+		return (NULL);
+	return (keypair);
 }
 
-void wg_noise_keypairs_clear(struct noise_keypairs *keypairs)
+void
+wg_noise_keypairs_clear(struct noise_keypairs *keypairs)
 {
 	struct noise_keypair *old;
 
-	spin_lock_bh(&keypairs->keypair_update_lock);
+	mtx_lock_spin(&keypairs->keypair_update_lock);
 
 	/* We zero the next_keypair before zeroing the others, so that
 	 * wg_noise_received_with_keypair returns early before subsequent ones
 	 * are zeroed.
 	 */
-	old = rcu_dereference_protected(keypairs->next_keypair,
-		lockdep_is_held(&keypairs->keypair_update_lock));
-	RCU_INIT_POINTER(keypairs->next_keypair, NULL);
+	old = keypairs->next_keypair;
+	keypairs->next_keypair = NULL;
 	wg_noise_keypair_put(old, true);
 
-	old = rcu_dereference_protected(keypairs->previous_keypair,
-		lockdep_is_held(&keypairs->keypair_update_lock));
-	RCU_INIT_POINTER(keypairs->previous_keypair, NULL);
+	old = keypairs->previous_keypair;
+	keypairs->previous_keypair = NULL;
 	wg_noise_keypair_put(old, true);
 
-	old = rcu_dereference_protected(keypairs->current_keypair,
-		lockdep_is_held(&keypairs->keypair_update_lock));
-	RCU_INIT_POINTER(keypairs->current_keypair, NULL);
+	old = keypairs->current_keypair;
+	keypairs->current_keypair = NULL;
 	wg_noise_keypair_put(old, true);
 
-	spin_unlock_bh(&keypairs->keypair_update_lock);
+	mtx_unlock_spin(&keypairs->keypair_update_lock);
 }
 
-void wg_noise_expire_current_peer_keypairs(struct wg_peer *peer)
+void
+wg_noise_expire_current_peer_keypairs(struct wg_peer *peer)
 {
-	struct noise_keypair *keypair;
-
 	wg_noise_handshake_clear(&peer->handshake);
 	wg_noise_reset_last_sent_handshake(&peer->last_sent_handshake);
 
-	spin_lock_bh(&peer->keypairs.keypair_update_lock);
-	keypair = rcu_dereference_protected(peer->keypairs.next_keypair,
-			lockdep_is_held(&peer->keypairs.keypair_update_lock));
-	if (keypair)
-		keypair->sending.is_valid = false;
-	keypair = rcu_dereference_protected(peer->keypairs.current_keypair,
-			lockdep_is_held(&peer->keypairs.keypair_update_lock));
-	if (keypair)
-		keypair->sending.is_valid = false;
-	spin_unlock_bh(&peer->keypairs.keypair_update_lock);
+	mtx_lock_spin(&peer->keypairs.keypair_update_lock);
+	if (peer->keypairs.next_keypair)
+		peer->keypairs.next_keypair->sending.is_valid = false;
+	if (peer->keypairs.current_keypair)
+		peer->keypairs.current_keypair->sending.is_valid = false;
+	mtx_unlock_spin(&peer->keypairs.keypair_update_lock);
 }
 
-static void add_new_keypair(struct noise_keypairs *keypairs,
-			    struct noise_keypair *new_keypair)
+static void
+add_new_keypair(struct noise_keypairs *keypairs,
+    struct noise_keypair *new_keypair)
 {
 	struct noise_keypair *previous_keypair, *next_keypair, *current_keypair;
 
-	spin_lock_bh(&keypairs->keypair_update_lock);
-	previous_keypair = rcu_dereference_protected(keypairs->previous_keypair,
-		lockdep_is_held(&keypairs->keypair_update_lock));
-	next_keypair = rcu_dereference_protected(keypairs->next_keypair,
-		lockdep_is_held(&keypairs->keypair_update_lock));
-	current_keypair = rcu_dereference_protected(keypairs->current_keypair,
-		lockdep_is_held(&keypairs->keypair_update_lock));
+	mtx_lock_spin(&keypairs->keypair_update_lock);
+	previous_keypair = keypairs->previous_keypair;
+	next_keypair = keypairs->next_keypair;
+	current_keypair = keypairs->current_keypair;
 	if (new_keypair->i_am_the_initiator) {
 		/* If we're the initiator, it means we've sent a handshake, and
 		 * received a confirmation response, which means this new
@@ -224,76 +249,68 @@ static void add_new_keypair(struct noise_keypairs *keypairs,
 			 * might be a bit less robust. Something to think about
 			 * for the future.
 			 */
-			RCU_INIT_POINTER(keypairs->next_keypair, NULL);
-			rcu_assign_pointer(keypairs->previous_keypair,
-					   next_keypair);
+			keypairs->next_keypair =  NULL;
+			keypairs->previous_keypair = next_keypair;
 			wg_noise_keypair_put(current_keypair, true);
 		} else /* If there wasn't an existing next keypair, we replace
 			* the previous with the current one.
 			*/
-			rcu_assign_pointer(keypairs->previous_keypair,
-					   current_keypair);
+			keypairs->previous_keypair = current_keypair;
+
 		/* At this point we can get rid of the old previous keypair, and
 		 * set up the new keypair.
 		 */
 		wg_noise_keypair_put(previous_keypair, true);
-		rcu_assign_pointer(keypairs->current_keypair, new_keypair);
+		keypairs->current_keypair = new_keypair;
 	} else {
 		/* If we're the responder, it means we can't use the new keypair
 		 * until we receive confirmation via the first data packet, so
 		 * we get rid of the existing previous one, the possibly
 		 * existing next one, and slide in the new next one.
 		 */
-		rcu_assign_pointer(keypairs->next_keypair, new_keypair);
+		keypairs->next_keypair = new_keypair;
 		wg_noise_keypair_put(next_keypair, true);
-		RCU_INIT_POINTER(keypairs->previous_keypair, NULL);
+		keypairs->previous_keypair = NULL;
 		wg_noise_keypair_put(previous_keypair, true);
 	}
-	spin_unlock_bh(&keypairs->keypair_update_lock);
+	mtx_unlock_spin(&keypairs->keypair_update_lock);
 }
 
-bool wg_noise_received_with_keypair(struct noise_keypairs *keypairs,
+bool
+wg_noise_received_with_keypair(struct noise_keypairs *keypairs,
 				    struct noise_keypair *received_keypair)
 {
 	struct noise_keypair *old_keypair;
-	bool key_is_new;
 
-	/* We first check without taking the spinlock. */
-	key_is_new = received_keypair ==
-		     rcu_access_pointer(keypairs->next_keypair);
-	if (__predict_true(!key_is_new))
-		return false;
+	if (__predict_true(received_keypair != keypairs->next_keypair))
+		return (false);
 
-	spin_lock_bh(&keypairs->keypair_update_lock);
+	mtx_lock_spin(&keypairs->keypair_update_lock);
 	/* After locking, we double check that things didn't change from
 	 * beneath us.
 	 */
-	if (__predict_false(received_keypair !=
-		    rcu_dereference_protected(keypairs->next_keypair,
-			    lockdep_is_held(&keypairs->keypair_update_lock)))) {
-		spin_unlock_bh(&keypairs->keypair_update_lock);
-		return false;
+	if (__predict_false(received_keypair != keypairs->next_keypair)) {
+		mtx_unlock_spin(&keypairs->keypair_update_lock);
+		return (false);
 	}
 
 	/* When we've finally received the confirmation, we slide the next
 	 * into the current, the current into the previous, and get rid of
 	 * the old previous.
 	 */
-	old_keypair = rcu_dereference_protected(keypairs->previous_keypair,
-		lockdep_is_held(&keypairs->keypair_update_lock));
-	rcu_assign_pointer(keypairs->previous_keypair,
-		rcu_dereference_protected(keypairs->current_keypair,
-			lockdep_is_held(&keypairs->keypair_update_lock)));
+	old_keypair = keypairs->previous_keypair;
+	keypairs->previous_keypair = keypairs->current_keypair;
 	wg_noise_keypair_put(old_keypair, true);
-	rcu_assign_pointer(keypairs->current_keypair, received_keypair);
-	RCU_INIT_POINTER(keypairs->next_keypair, NULL);
+	keypairs->current_keypair = received_keypair;
+	keypairs->next_keypair = NULL;
 
-	spin_unlock_bh(&keypairs->keypair_update_lock);
-	return true;
+	mtx_unlock_spin(&keypairs->keypair_update_lock);
+	return (true);
 }
 
 /* Must hold static_identity->lock */
-void wg_noise_set_static_identity_private_key(
+void
+wg_noise_set_static_identity_private_key(
 	struct noise_static_identity *static_identity,
 	const uint8_t private_key[NOISE_PUBLIC_KEY_LEN])
 {
@@ -308,20 +325,13 @@ void wg_noise_set_static_identity_private_key(
  *  - https://eprint.iacr.org/2010/264.pdf
  *  - https://tools.ietf.org/html/rfc5869
  */
-static void kdf(uint8_t *first_dst, uint8_t *second_dst, uint8_t *third_dst, const uint8_t *data,
+static void
+kdf(uint8_t *first_dst, uint8_t *second_dst, uint8_t *third_dst, const uint8_t *data,
 		size_t first_len, size_t second_len, size_t third_len,
 		size_t data_len, const uint8_t chaining_key[NOISE_HASH_LEN])
 {
 	uint8_t output[BLAKE2S_HASH_SIZE + 1];
 	uint8_t secret[BLAKE2S_HASH_SIZE];
-
-	WARN_ON(IS_ENABLED(DEBUG) &&
-		(first_len > BLAKE2S_HASH_SIZE ||
-		 second_len > BLAKE2S_HASH_SIZE ||
-		 third_len > BLAKE2S_HASH_SIZE ||
-		 ((second_len || second_dst || third_len || third_dst) &&
-		  (!first_len || !first_dst)) ||
-		 ((third_len || third_dst) && (!second_len || !second_dst))));
 
 	/* Extract entropy from data into secret */
 	blake2s_hmac(secret, data, chaining_key, BLAKE2S_HASH_SIZE, data_len,
@@ -356,23 +366,25 @@ static void kdf(uint8_t *first_dst, uint8_t *second_dst, uint8_t *third_dst, con
 
 out:
 	/* Clear sensitive data from stack */
-	memzero_explicit(secret, BLAKE2S_HASH_SIZE);
-	memzero_explicit(output, BLAKE2S_HASH_SIZE + 1);
+	explicit_bzero(secret, BLAKE2S_HASH_SIZE);
+	explicit_bzero(output, BLAKE2S_HASH_SIZE + 1);
 }
 
-static void symmetric_key_init(struct noise_symmetric_key *key)
+static void
+symmetric_key_init(struct noise_symmetric_key *key)
 {
-	spin_lock_init(&key->counter.receive.lock);
-	atomic64_set(&key->counter.counter, 0);
-	memset(key->counter.receive.backtrack, 0,
-	       sizeof(key->counter.receive.backtrack));
-	key->birthdate = ktime_get_coarse_boottime_ns();
+	mtx_init(&key->nsk_counter.receive.lock, "key receive lock", NULL, MTX_SPIN);
+	atomic_store_rel_64(&key->nsk_counter.nc_counter, 0);
+	memset(key->nsk_counter.receive.backtrack, 0,
+	       sizeof(key->nsk_counter.receive.backtrack));
+	key->birthdate = gethrtime();
 	key->is_valid = true;
 }
 
-static void derive_keys(struct noise_symmetric_key *first_dst,
-			struct noise_symmetric_key *second_dst,
-			const uint8_t chaining_key[NOISE_HASH_LEN])
+static void
+derive_keys(struct noise_symmetric_key *first_dst,
+    struct noise_symmetric_key *second_dst,
+    const uint8_t chaining_key[NOISE_HASH_LEN])
 {
 	kdf(first_dst->key, second_dst->key, NULL, NULL,
 	    NOISE_SYMMETRIC_KEY_LEN, NOISE_SYMMETRIC_KEY_LEN, 0, 0,
@@ -381,22 +393,24 @@ static void derive_keys(struct noise_symmetric_key *first_dst,
 	symmetric_key_init(second_dst);
 }
 
-static bool mix_dh(uint8_t chaining_key[NOISE_HASH_LEN],
-				uint8_t key[NOISE_SYMMETRIC_KEY_LEN],
-				const uint8_t private[NOISE_PUBLIC_KEY_LEN],
-				const uint8_t public[NOISE_PUBLIC_KEY_LEN])
+static bool
+mix_dh(uint8_t chaining_key[NOISE_HASH_LEN],
+    uint8_t key[NOISE_SYMMETRIC_KEY_LEN],
+    const uint8_t private[NOISE_PUBLIC_KEY_LEN],
+    const uint8_t public[NOISE_PUBLIC_KEY_LEN])
 {
 	uint8_t dh_calculation[NOISE_PUBLIC_KEY_LEN];
 
 	if (__predict_false(!curve25519(dh_calculation, private, public)))
-		return false;
+		return (false);
 	kdf(chaining_key, key, NULL, dh_calculation, NOISE_HASH_LEN,
 	    NOISE_SYMMETRIC_KEY_LEN, 0, NOISE_PUBLIC_KEY_LEN, chaining_key);
-	memzero_explicit(dh_calculation, NOISE_PUBLIC_KEY_LEN);
-	return true;
+	explicit_bzero(dh_calculation, NOISE_PUBLIC_KEY_LEN);
+	return (true);
 }
 
-static void mix_hash(uint8_t hash[NOISE_HASH_LEN], const uint8_t *src, size_t src_len)
+static void
+mix_hash(uint8_t hash[NOISE_HASH_LEN], const uint8_t *src, size_t src_len)
 {
 	struct blake2s_state blake;
 
@@ -406,30 +420,33 @@ static void mix_hash(uint8_t hash[NOISE_HASH_LEN], const uint8_t *src, size_t sr
 	blake2s_final(&blake, hash);
 }
 
-static void mix_psk(uint8_t chaining_key[NOISE_HASH_LEN], uint8_t hash[NOISE_HASH_LEN],
-		    uint8_t key[NOISE_SYMMETRIC_KEY_LEN],
-		    const uint8_t psk[NOISE_SYMMETRIC_KEY_LEN])
+static void
+mix_psk(uint8_t chaining_key[NOISE_HASH_LEN], uint8_t hash[NOISE_HASH_LEN],
+    uint8_t key[NOISE_SYMMETRIC_KEY_LEN],
+    const uint8_t psk[NOISE_SYMMETRIC_KEY_LEN])
 {
 	uint8_t temp_hash[NOISE_HASH_LEN];
 
 	kdf(chaining_key, temp_hash, key, psk, NOISE_HASH_LEN, NOISE_HASH_LEN,
 	    NOISE_SYMMETRIC_KEY_LEN, NOISE_SYMMETRIC_KEY_LEN, chaining_key);
 	mix_hash(hash, temp_hash, NOISE_HASH_LEN);
-	memzero_explicit(temp_hash, NOISE_HASH_LEN);
+	explicit_bzero(temp_hash, NOISE_HASH_LEN);
 }
 
-static void handshake_init(uint8_t chaining_key[NOISE_HASH_LEN],
-			   uint8_t hash[NOISE_HASH_LEN],
-			   const uint8_t remote_static[NOISE_PUBLIC_KEY_LEN])
+static void
+handshake_init(uint8_t chaining_key[NOISE_HASH_LEN],
+    uint8_t hash[NOISE_HASH_LEN],
+    const uint8_t remote_static[NOISE_PUBLIC_KEY_LEN])
 {
 	memcpy(hash, handshake_init_hash, NOISE_HASH_LEN);
 	memcpy(chaining_key, handshake_init_chaining_key, NOISE_HASH_LEN);
 	mix_hash(hash, remote_static, NOISE_PUBLIC_KEY_LEN);
 }
 
-static void message_encrypt(uint8_t *dst_ciphertext, const uint8_t *src_plaintext,
-			    size_t src_len, uint8_t key[NOISE_SYMMETRIC_KEY_LEN],
-			    uint8_t hash[NOISE_HASH_LEN])
+static void
+message_encrypt(uint8_t *dst_ciphertext, const uint8_t *src_plaintext,
+    size_t src_len, uint8_t key[NOISE_SYMMETRIC_KEY_LEN],
+    uint8_t hash[NOISE_HASH_LEN])
 {
 	chacha20poly1305_encrypt(dst_ciphertext, src_plaintext, src_len, hash,
 				 NOISE_HASH_LEN,
@@ -437,22 +454,24 @@ static void message_encrypt(uint8_t *dst_ciphertext, const uint8_t *src_plaintex
 	mix_hash(hash, dst_ciphertext, noise_encrypted_len(src_len));
 }
 
-static bool message_decrypt(uint8_t *dst_plaintext, const uint8_t *src_ciphertext,
-			    size_t src_len, uint8_t key[NOISE_SYMMETRIC_KEY_LEN],
-			    uint8_t hash[NOISE_HASH_LEN])
+static bool
+message_decrypt(uint8_t *dst_plaintext, const uint8_t *src_ciphertext,
+    size_t src_len, uint8_t key[NOISE_SYMMETRIC_KEY_LEN],
+    uint8_t hash[NOISE_HASH_LEN])
 {
 	if (!chacha20poly1305_decrypt(dst_plaintext, src_ciphertext, src_len,
 				      hash, NOISE_HASH_LEN,
 				      0 /* Always zero for Noise_IK */, key))
-		return false;
+		return (false);
 	mix_hash(hash, src_ciphertext, src_len);
-	return true;
+	return (true);
 }
 
-static void message_ephemeral(uint8_t ephemeral_dst[NOISE_PUBLIC_KEY_LEN],
-			      const uint8_t ephemeral_src[NOISE_PUBLIC_KEY_LEN],
-			      uint8_t chaining_key[NOISE_HASH_LEN],
-			      uint8_t hash[NOISE_HASH_LEN])
+static void
+message_ephemeral(uint8_t ephemeral_dst[NOISE_PUBLIC_KEY_LEN],
+    const uint8_t ephemeral_src[NOISE_PUBLIC_KEY_LEN],
+    uint8_t chaining_key[NOISE_HASH_LEN],
+    uint8_t hash[NOISE_HASH_LEN])
 {
 	if (ephemeral_dst != ephemeral_src)
 		memcpy(ephemeral_dst, ephemeral_src, NOISE_PUBLIC_KEY_LEN);
@@ -461,23 +480,26 @@ static void message_ephemeral(uint8_t ephemeral_dst[NOISE_PUBLIC_KEY_LEN],
 	    NOISE_PUBLIC_KEY_LEN, chaining_key);
 }
 
-static void tai64n_now(uint8_t output[NOISE_TIMESTAMP_LEN])
+#define rounddown_p2(n) (1UL << (flsl(n) - 1))
+
+static void
+tai64n_now(uint8_t output[NOISE_TIMESTAMP_LEN])
 {
 	struct timespec now;
 
-	ktime_get_real_ts64(&now);
+	nanotime(&now);
 
 	/* In order to prevent some sort of infoleak from precise timers, we
 	 * round down the nanoseconds part to the closest rounded-down power of
 	 * two to the maximum initiations per second allowed anyway by the
 	 * implementation.
 	 */
-	now.tv_nsec = ALIGN_DOWN(now.tv_nsec,
-		rounddown_pow_of_two(NSEC_PER_SEC / INITIATIONS_PER_SECOND));
+	now.tv_nsec = rounddown(now.tv_nsec,
+		rounddown_p2(NANOSECOND / INITIATIONS_PER_SECOND));
 
 	/* https://cr.yp.to/libtai/tai64.html */
-	*(__be64 *)output = cpu_to_be64(0x400000000000000aULL + now.tv_sec);
-	*(__be32 *)(output + sizeof(__be64)) = cpu_to_be32(now.tv_nsec);
+	*(uint64_t *)output = htobe64(0x400000000000000aULL + now.tv_sec);
+	*(uint32_t *)(output + sizeof(uint64_t)) = htobe32(now.tv_nsec);
 }
 
 bool
@@ -486,20 +508,21 @@ wg_noise_handshake_create_initiation(struct message_handshake_initiation *dst,
 {
 	uint8_t timestamp[NOISE_TIMESTAMP_LEN];
 	uint8_t key[NOISE_SYMMETRIC_KEY_LEN];
-	bool ret = false;
+	bool rc = false;
 
 	/* We need to wait for crng _before_ taking any locks, since
 	 * curve25519_generate_secret uses get_random_bytes_wait.
 	 */
-	wait_for_random_bytes();
+	while(!is_random_seeded())
+		pause_sig("random seed", hz/10);
 
-	down_read(&handshake->static_identity->lock);
-	down_write(&handshake->lock);
+	sx_slock(&handshake->static_identity->nsi_lock);
+	sx_xlock(&handshake->nh_lock);
 
 	if (__predict_false(!handshake->static_identity->has_identity))
 		goto out;
 
-	dst->header.type = cpu_to_le32(MESSAGE_HANDSHAKE_INITIATION);
+	dst->header.type = htole32(MESSAGE_HANDSHAKE_INITIATION);
 
 	handshake_init(handshake->chaining_key, handshake->hash,
 		       handshake->remote_static);
@@ -539,20 +562,20 @@ wg_noise_handshake_create_initiation(struct message_handshake_initiation *dst,
 		&handshake->entry);
 
 	handshake->state = HANDSHAKE_CREATED_INITIATION;
-	ret = true;
+	rc = true;
 
 out:
-	up_write(&handshake->lock);
-	up_read(&handshake->static_identity->lock);
-	memzero_explicit(key, NOISE_SYMMETRIC_KEY_LEN);
-	return ret;
+	sx_xunlock(&handshake->nh_lock);
+	sx_sunlock(&handshake->static_identity->nsi_lock);
+	explicit_bzero(key, NOISE_SYMMETRIC_KEY_LEN);
+	return (rc);
 }
 
 struct wg_peer *
 wg_noise_handshake_consume_initiation(struct message_handshake_initiation *src,
 				      struct wg_device *wg)
 {
-	struct wg_peer *peer = NULL, *ret_peer = NULL;
+	struct wg_peer *peer = NULL, *peer_result = NULL;
 	struct noise_handshake *handshake;
 	bool replay_attack, flood_attack;
 	uint8_t key[NOISE_SYMMETRIC_KEY_LEN];
@@ -563,7 +586,7 @@ wg_noise_handshake_consume_initiation(struct message_handshake_initiation *src,
 	uint8_t t[NOISE_TIMESTAMP_LEN];
 	uint64_t initiation_consumption;
 
-	down_read(&wg->static_identity.lock);
+	sx_slock(&wg->static_identity.nsi_lock);
 	if (__predict_false(!wg->static_identity.has_identity))
 		goto out;
 
@@ -582,7 +605,7 @@ wg_noise_handshake_consume_initiation(struct message_handshake_initiation *src,
 		goto out;
 
 	/* Lookup which peer we're actually talking to */
-	peer = wg_pubkey_hashtable_lookup(wg->peer_hashtable, s);
+	peer = wg_pubkey_table_lookup(wg->peer_hashtable, s);
 	if (!peer)
 		goto out;
 	handshake = &peer->handshake;
@@ -597,59 +620,61 @@ wg_noise_handshake_consume_initiation(struct message_handshake_initiation *src,
 			     sizeof(src->encrypted_timestamp), key, hash))
 		goto out;
 
-	down_read(&handshake->lock);
+	sx_slock(&handshake->nh_lock);
 	replay_attack = memcmp(t, handshake->latest_timestamp,
 			       NOISE_TIMESTAMP_LEN) <= 0;
-	flood_attack = (s64)handshake->last_initiation_consumption +
-			       NSEC_PER_SEC / INITIATIONS_PER_SECOND >
-		       (s64)ktime_get_coarse_boottime_ns();
-	up_read(&handshake->lock);
+	flood_attack = (int64_t)handshake->last_initiation_consumption +
+			       NANOSECOND / INITIATIONS_PER_SECOND >
+		(int64_t)gethrtime();
+	sx_sunlock(&handshake->nh_lock);
 	if (replay_attack || flood_attack)
 		goto out;
 
 	/* Success! Copy everything to peer */
-	down_write(&handshake->lock);
+	sx_xlock(&handshake->nh_lock);
 	memcpy(handshake->remote_ephemeral, e, NOISE_PUBLIC_KEY_LEN);
 	if (memcmp(t, handshake->latest_timestamp, NOISE_TIMESTAMP_LEN) > 0)
 		memcpy(handshake->latest_timestamp, t, NOISE_TIMESTAMP_LEN);
 	memcpy(handshake->hash, hash, NOISE_HASH_LEN);
 	memcpy(handshake->chaining_key, chaining_key, NOISE_HASH_LEN);
 	handshake->remote_index = src->sender_index;
-	if ((s64)(handshake->last_initiation_consumption -
-	    (initiation_consumption = ktime_get_coarse_boottime_ns())) < 0)
+	if ((int64_t)(handshake->last_initiation_consumption -
+	    (initiation_consumption = gethrtime())) < 0)
 		handshake->last_initiation_consumption = initiation_consumption;
 	handshake->state = HANDSHAKE_CONSUMED_INITIATION;
-	up_write(&handshake->lock);
-	ret_peer = peer;
+	sx_xunlock(&handshake->nh_lock);
+	peer_result = peer;
 
 out:
-	memzero_explicit(key, NOISE_SYMMETRIC_KEY_LEN);
-	memzero_explicit(hash, NOISE_HASH_LEN);
-	memzero_explicit(chaining_key, NOISE_HASH_LEN);
-	up_read(&wg->static_identity.lock);
-	if (!ret_peer)
+	explicit_bzero(key, NOISE_SYMMETRIC_KEY_LEN);
+	explicit_bzero(hash, NOISE_HASH_LEN);
+	explicit_bzero(chaining_key, NOISE_HASH_LEN);
+	sx_sunlock(&wg->static_identity.nsi_lock);
+	if (!peer_result)
 		wg_peer_put(peer);
-	return ret_peer;
+	return (peer_result);
 }
 
-bool wg_noise_handshake_create_response(struct message_handshake_response *dst,
+bool
+wg_noise_handshake_create_response(struct message_handshake_response *dst,
 					struct noise_handshake *handshake)
 {
 	uint8_t key[NOISE_SYMMETRIC_KEY_LEN];
-	bool ret = false;
+	bool rc = false;
 
 	/* We need to wait for crng _before_ taking any locks, since
 	 * curve25519_generate_secret uses get_random_bytes_wait.
 	 */
-	wait_for_random_bytes();
+	while(!is_random_seeded())
+		pause_sig("random seed", hz/10);
 
-	down_read(&handshake->static_identity->lock);
-	down_write(&handshake->lock);
+	sx_slock(&handshake->static_identity->nsi_lock);
+	sx_xlock(&handshake->nh_lock);
 
 	if (handshake->state != HANDSHAKE_CONSUMED_INITIATION)
 		goto out;
 
-	dst->header.type = cpu_to_le32(MESSAGE_HANDSHAKE_RESPONSE);
+	dst->header.type = htole32(MESSAGE_HANDSHAKE_RESPONSE);
 	dst->receiver_index = handshake->remote_index;
 
 	/* e */
@@ -683,13 +708,13 @@ bool wg_noise_handshake_create_response(struct message_handshake_response *dst,
 		&handshake->entry);
 
 	handshake->state = HANDSHAKE_CREATED_RESPONSE;
-	ret = true;
+	rc = true;
 
 out:
-	up_write(&handshake->lock);
-	up_read(&handshake->static_identity->lock);
-	memzero_explicit(key, NOISE_SYMMETRIC_KEY_LEN);
-	return ret;
+	sx_xunlock(&handshake->nh_lock);
+	sx_sunlock(&handshake->static_identity->nsi_lock);
+	explicit_bzero(key, NOISE_SYMMETRIC_KEY_LEN);
+	return (rc);
 }
 
 struct wg_peer *
@@ -706,7 +731,7 @@ wg_noise_handshake_consume_response(struct message_handshake_response *src,
 	uint8_t ephemeral_private[NOISE_PUBLIC_KEY_LEN];
 	uint8_t static_private[NOISE_PUBLIC_KEY_LEN];
 
-	down_read(&wg->static_identity.lock);
+	sx_slock(&wg->static_identity.nsi_lock);
 
 	if (__predict_false(!wg->static_identity.has_identity))
 		goto out;
@@ -717,13 +742,13 @@ wg_noise_handshake_consume_response(struct message_handshake_response *src,
 	if (__predict_false(!handshake))
 		goto out;
 
-	down_read(&handshake->lock);
+	sx_slock(&handshake->nh_lock);
 	state = handshake->state;
 	memcpy(hash, handshake->hash, NOISE_HASH_LEN);
 	memcpy(chaining_key, handshake->chaining_key, NOISE_HASH_LEN);
 	memcpy(ephemeral_private, handshake->ephemeral_private,
 	       NOISE_PUBLIC_KEY_LEN);
-	up_read(&handshake->lock);
+	sx_sunlock(&handshake->nh_lock);
 
 	if (state != HANDSHAKE_CREATED_INITIATION)
 		goto fail;
@@ -748,12 +773,12 @@ wg_noise_handshake_consume_response(struct message_handshake_response *src,
 		goto fail;
 
 	/* Success! Copy everything to peer */
-	down_write(&handshake->lock);
+	sx_xlock(&handshake->nh_lock);
 	/* It's important to check that the state is still the same, while we
 	 * have an exclusive lock.
 	 */
 	if (handshake->state != state) {
-		up_write(&handshake->lock);
+		sx_xunlock(&handshake->nh_lock);
 		goto fail;
 	}
 	memcpy(handshake->remote_ephemeral, e, NOISE_PUBLIC_KEY_LEN);
@@ -761,29 +786,30 @@ wg_noise_handshake_consume_response(struct message_handshake_response *src,
 	memcpy(handshake->chaining_key, chaining_key, NOISE_HASH_LEN);
 	handshake->remote_index = src->sender_index;
 	handshake->state = HANDSHAKE_CONSUMED_RESPONSE;
-	up_write(&handshake->lock);
+	sx_xunlock(&handshake->nh_lock);
 	ret_peer = peer;
 	goto out;
 
 fail:
 	wg_peer_put(peer);
 out:
-	memzero_explicit(key, NOISE_SYMMETRIC_KEY_LEN);
-	memzero_explicit(hash, NOISE_HASH_LEN);
-	memzero_explicit(chaining_key, NOISE_HASH_LEN);
-	memzero_explicit(ephemeral_private, NOISE_PUBLIC_KEY_LEN);
-	memzero_explicit(static_private, NOISE_PUBLIC_KEY_LEN);
-	up_read(&wg->static_identity.lock);
+	explicit_bzero(key, NOISE_SYMMETRIC_KEY_LEN);
+	explicit_bzero(hash, NOISE_HASH_LEN);
+	explicit_bzero(chaining_key, NOISE_HASH_LEN);
+	explicit_bzero(ephemeral_private, NOISE_PUBLIC_KEY_LEN);
+	explicit_bzero(static_private, NOISE_PUBLIC_KEY_LEN);
+	sx_sunlock(&wg->static_identity.nsi_lock);
 	return ret_peer;
 }
 
-bool wg_noise_handshake_begin_session(struct noise_handshake *handshake,
+bool
+wg_noise_handshake_begin_session(struct noise_handshake *handshake,
 				      struct noise_keypairs *keypairs)
 {
 	struct noise_keypair *new_keypair;
-	bool ret = false;
+	bool is_dead, rc = false;
 
-	down_write(&handshake->lock);
+	sx_xlock(&handshake->nh_lock);
 	if (handshake->state != HANDSHAKE_CREATED_RESPONSE &&
 	    handshake->state != HANDSHAKE_CONSUMED_RESPONSE)
 		goto out;
@@ -803,23 +829,24 @@ bool wg_noise_handshake_begin_session(struct noise_handshake *handshake,
 			    handshake->chaining_key);
 
 	handshake_zero(handshake);
-	rcu_read_lock_bh();
-	if (__predict_true(!READ_ONCE(container_of(handshake, struct wg_peer,
-					   handshake)->is_dead))) {
+	epoch_enter(net_epoch);
+	is_dead = atomic_load_acq_char((char *)&__containerof(handshake, struct wg_peer,
+											   handshake)->is_dead);
+	if (__predict_true(!is_dead)) {
 		add_new_keypair(keypairs, new_keypair);
 		net_dbg_ratelimited("%s: Keypair %llu created for peer %llu\n",
 				    handshake->entry.peer->device->dev->name,
 				    new_keypair->internal_id,
 				    handshake->entry.peer->internal_id);
-		ret = wg_index_hashtable_replace(
+		rc = wg_index_hashtable_replace(
 			handshake->entry.peer->device->index_hashtable,
 			&handshake->entry, &new_keypair->entry);
-	} else {
-		kzfree(new_keypair);
 	}
-	rcu_read_unlock_bh();
-
+	epoch_exit(net_epoch);
+	/* need zero */
+	if (is_dead)
+		free(new_keypair, M_WG);
 out:
-	up_write(&handshake->lock);
-	return ret;
+	sx_xunlock(&handshake->nh_lock);
+	return (rc);
 }

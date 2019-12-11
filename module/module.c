@@ -52,8 +52,10 @@ __FBSDID("$FreeBSD$");
 #include <sys/device.h>
 #include <sys/noise.h>
 #include <sys/ratelimiter.h>
+#include <sys/wg_module.h>
 #include <crypto/zinc.h>
 
+MALLOC_DEFINE(M_WG, "WG", "wireguard");
 
 struct wg_softc {
 	if_softc_ctx_t shared;

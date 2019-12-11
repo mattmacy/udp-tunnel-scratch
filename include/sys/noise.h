@@ -7,6 +7,8 @@
 
 #include <sys/types.h>
 #include <sys/timex.h>
+#include <sys/epoch.h>
+
 #if 0
 #include <linux/spinlock.h>
 #include <linux/atomic.h>
@@ -17,16 +19,16 @@
 
 union noise_counter {
 	struct {
-		uint64_t counter;
+		volatile uint64_t rx_counter;
 		unsigned long backtrack[COUNTER_BITS_TOTAL / __LONG_BIT];
-		//spinlock_t lock;
+		struct mtx lock;
 	} receive;
-	//atomic64_t counter;
+	volatile uint64_t nc_counter;
 };
 
 struct noise_symmetric_key {
 	uint8_t key[NOISE_SYMMETRIC_KEY_LEN];
-	union noise_counter counter;
+	union noise_counter nsk_counter;
 	uint64_t birthdate;
 	bool is_valid;
 };
@@ -38,9 +40,8 @@ struct noise_keypair {
 	uint32_t remote_index;
 	bool i_am_the_initiator;
 	uint64_t internal_id;
-
-	//	struct kref refcount;
-	//	struct rcu_head rcu;
+	volatile int nk_refcount;
+	struct epoch_context nk_epoch_ctx;
 };
 
 struct noise_keypairs {
