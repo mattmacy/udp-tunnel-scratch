@@ -42,6 +42,24 @@ eh_len(struct mbuf *m)
 	return (len);
 }
 
+static inline uint16_t
+ip_proto(struct mbuf *m)
+{
+	uint16_t len, type;
+	
+	len = eh_len(m);
+	if (m->m_len <= len)
+		return (0);
+	type = eh_type(m);
+	if (type == ETHERTYPE_IP) 
+		len += sizeof(struct ip);
+	if (type == ETHERTYPE_IPV6)
+		len += sizeof(struct ip6_hdr);
+	if (m->m_len < len)
+		return (0);
+	return (type);
+}
+
 static inline struct ip *
 ip_hdr(struct mbuf *m)
 {

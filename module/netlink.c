@@ -215,7 +215,7 @@ wg_get_device_dump(struct mbuf *m, struct netlink_callback *cb)
 
 	rtnl_lock();
 	mutex_lock(&wg->device_update_lock);
-	cb->seq = wg->device_update_gen;
+	cb->seq = wg->wd_gen;
 	next_peer_cursor = ctx->next_peer;
 
 	hdr = genlmsg_put(m, NETLINK_CB(cb->m).portid, cb->nlh->nlmsg_seq,
@@ -261,7 +261,8 @@ wg_get_device_dump(struct mbuf *m, struct netlink_callback *cb)
 		nla_nest_cancel(m, peers_nest);
 		goto out;
 	}
-	lockdep_assert_held(&wg->device_update_lock);
+	mtx_assert(&wg->device_update_lock, MA_OWNED);
+
 	peer = list_prepare_entry(ctx->next_peer, &wg->peer_list, peer_list);
 	list_for_each_entry_continue(peer, &wg->peer_list, peer_list) {
 		if (get_peer(peer, m, ctx)) {
@@ -522,7 +523,7 @@ wg_set_device(struct mbuf *m, struct genl_info *info)
 	    !ns_capable(wg->creating_net->user_ns, CAP_NET_ADMIN))
 		goto out;
 
-	++wg->device_update_gen;
+	++wg->wd_gen;
 
 	if (info->attrs[WGDEVICE_A_FWMARK]) {
 		struct wg_peer *peer;

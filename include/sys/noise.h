@@ -9,14 +9,6 @@
 #include <sys/timex.h>
 #include <sys/epoch.h>
 
-#if 0
-#include <linux/spinlock.h>
-#include <linux/atomic.h>
-#include <linux/rwsem.h>
-#include <linux/mutex.h>
-#include <linux/kref.h>
-#endif
-
 union noise_counter {
 	struct {
 		volatile uint64_t rx_counter;
@@ -34,12 +26,12 @@ struct noise_symmetric_key {
 };
 
 struct noise_keypair {
-	struct index_hashtable_entry entry;
-	struct noise_symmetric_key sending;
-	struct noise_symmetric_key receiving;
-	uint32_t remote_index;
+	struct index_hashtable_entry nk_entry;
+	struct noise_symmetric_key nk_send;
+	struct noise_symmetric_key nk_recv;
+	uint32_t nk_remote_index;
 	bool i_am_the_initiator;
-	uint64_t internal_id;
+	uint64_t nk_id;
 	volatile int nk_refcount;
 	struct epoch_context nk_epoch_ctx;
 };
@@ -67,9 +59,9 @@ enum noise_handshake_state {
 };
 
 struct noise_handshake {
-	struct index_hashtable_entry entry;
+	struct index_hashtable_entry nh_entry;
 
-	enum noise_handshake_state state;
+	enum noise_handshake_state nh_state;
 	uint64_t last_initiation_consumption;
 
 	struct noise_static_identity *static_identity;
@@ -85,7 +77,7 @@ struct noise_handshake {
 	uint8_t chaining_key[NOISE_HASH_LEN];
 
 	uint8_t latest_timestamp[NOISE_TIMESTAMP_LEN];
-	uint32_t remote_index;
+	uint32_t nh_remote_index;
 
 	/* Protects all members except the immutable (after noise_handshake_
 	 * init): remote_static, precomputed_static_static, static_identity.
@@ -93,9 +85,9 @@ struct noise_handshake {
 	struct sx nh_lock;
 };
 
-struct wg_device;
+struct wg_softc;
 
-void wg_noise_init(void);
+void wg_noise_param_init(void);
 bool wg_noise_handshake_init(struct noise_handshake *handshake,
 			   struct noise_static_identity *static_identity,
 			   const uint8_t peer_public_key[NOISE_PUBLIC_KEY_LEN],
@@ -125,13 +117,13 @@ wg_noise_handshake_create_initiation(struct message_handshake_initiation *dst,
 				     struct noise_handshake *handshake);
 struct wg_peer *
 wg_noise_handshake_consume_initiation(struct message_handshake_initiation *src,
-				      struct wg_device *wg);
+				      struct wg_softc *sc);
 
 bool wg_noise_handshake_create_response(struct message_handshake_response *dst,
 					struct noise_handshake *handshake);
 struct wg_peer *
 wg_noise_handshake_consume_response(struct message_handshake_response *src,
-				    struct wg_device *wg);
+				    struct wg_softc *sc);
 
 bool wg_noise_handshake_begin_session(struct noise_handshake *handshake,
 				      struct noise_keypairs *keypairs);

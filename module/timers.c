@@ -1,5 +1,4 @@
 #include "timers.h"
-#include "device.h"
 #include "peer.h"
 #include "queueing.h"
 #include "socket.h"

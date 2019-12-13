@@ -1,16 +1,17 @@
 #ifndef _WG_PEER_H
 #define _WG_PEER_H
 
+#include <sys/types.h>
+#include <sys/mbuf.h>
+#include <sys/socket.h>
 #include <sys/lock.h>
 #include <sys/rwlock.h>
-#include <sys/device.h>
 #include <sys/noise.h>
 #include <sys/cookie.h>
 
 #include <sys/types.h>
 
 
-struct wg_device;
 
 struct endpoint {
 	union {
@@ -29,7 +30,7 @@ struct endpoint {
 };
 
 struct wg_peer {
-	struct wg_device *device;
+	struct wg_softc *wp_sc;
 	struct crypt_queue tx_queue, rx_queue;
 	//struct sk_buff_head staged_packet_queue;
 	int serial_work_cpu;
@@ -40,7 +41,7 @@ struct wg_peer {
 	struct noise_handshake handshake;
 	volatile uint64_t last_sent_handshake;
 	//struct work_struct transmit_handshake_work, clear_peer_work;
-	struct cookie latest_cookie;
+	struct wg_cookie latest_cookie;
 	//struct hlist_node pubkey_hash;
 	uint64_t rx_bytes, tx_bytes;
 	//struct timer_list timer_retransmit_handshake, timer_send_keepalive;
@@ -53,16 +54,18 @@ struct wg_peer {
 	struct timespec walltime_last_handshake;
 	volatile uint32_t wp_refcount;
 	struct epoch_context wp_epoch_ctx;
-	//struct list_head peer_list;
+	CK_STAILQ_ENTRY(wg_peer) wp_entry;
+	CK_LIST_HEAD(, whitelist_node) wp_whitelist;
 	//struct list_head allowedips_list;
 	uint64_t internal_id;
 	//struct napi_struct napi;
 	bool is_dead;
 };
 
-struct wg_peer *wg_peer_create(struct wg_device *wg,
-			       const uint8_t public_key[NOISE_PUBLIC_KEY_LEN],
-			       const uint8_t preshared_key[NOISE_SYMMETRIC_KEY_LEN]);
+int wg_peer_create(struct wg_softc *wg,
+    const uint8_t public_key[NOISE_PUBLIC_KEY_LEN],
+    const uint8_t preshared_key[NOISE_SYMMETRIC_KEY_LEN],
+    struct wg_peer **ppeer);
 
 struct wg_peer *wg_peer_get_maybe_zero(struct wg_peer *peer);
 static inline struct wg_peer *wg_peer_get(struct wg_peer *peer)
@@ -73,6 +76,6 @@ static inline struct wg_peer *wg_peer_get(struct wg_peer *peer)
 }
 void wg_peer_put(struct wg_peer *peer);
 void wg_peer_remove(struct wg_peer *peer);
-void wg_peer_remove_all(struct wg_device *wg);
+void wg_peer_remove_all(struct wg_softc *wg);
 
 #endif /* _WG_PEER_H */

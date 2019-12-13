@@ -3,11 +3,11 @@
 #include <sys/libkern.h>
 #include <sys/endian.h>
 
+#include <sys/wg_module.h>
 #include <sys/netmacros.h>
 #include <sys/cookie.h>
 #include <sys/socket.h>
 #include <sys/peer.h>
-#include <sys/device.h>
 #include <sys/messages.h>
 #include <sys/ratelimiter.h>
 #include <sys/timers.h>
@@ -21,13 +21,13 @@
 #include <net/ethernet.h>
 
 void
-wg_cookie_checker_init(struct cookie_checker *checker,
-			    struct wg_device *wg)
+wg_cookie_checker_init(struct wg_cookie_checker *checker,
+			    struct wg_softc *sc)
 {
-	sx_init(&checker->secret_lock, "secret lock");
-	checker->secret_birthdate = gethrtime();
-	arc4random_buf(checker->secret, NOISE_HASH_LEN);
-	checker->device = wg;
+	sx_init(&checker->wcc_lock, "secret lock");
+	checker->wcc_birthdate = gethrtime();
+	arc4random_buf(checker->wcc_secret, NOISE_HASH_LEN);
+	checker->wcc_sc = sc;
 }
 
 enum { COOKIE_KEY_LABEL_LEN = 8 };
@@ -49,17 +49,17 @@ precompute_key(uint8_t key[NOISE_SYMMETRIC_KEY_LEN],
 
 /* Must hold peer->handshake.static_identity->lock */
 void
-wg_cookie_checker_precompute_device_keys(struct cookie_checker *checker)
+wg_cookie_checker_precompute_device_keys(struct wg_cookie_checker *checker)
 {
-	if (__predict_true(checker->device->static_identity.has_identity)) {
-		precompute_key(checker->cookie_encryption_key,
-			       checker->device->static_identity.static_public,
+	if (__predict_true(checker->wcc_sc->static_identity.has_identity)) {
+		precompute_key(checker->wcc_encryption_key,
+			       checker->wcc_sc->static_identity.static_public,
 			       cookie_key_label);
 		precompute_key(checker->message_mac1_key,
-			       checker->device->static_identity.static_public,
+			       checker->wcc_sc->static_identity.static_public,
 			       mac1_key_label);
 	} else {
-		memset(checker->cookie_encryption_key, 0,
+		memset(checker->wcc_encryption_key, 0,
 		       NOISE_SYMMETRIC_KEY_LEN);
 		memset(checker->message_mac1_key, 0, NOISE_SYMMETRIC_KEY_LEN);
 	}
@@ -75,7 +75,7 @@ wg_cookie_checker_precompute_peer_keys(struct wg_peer *peer)
 }
 
 void
-wg_cookie_init(struct cookie *cookie)
+wg_cookie_init(struct wg_cookie *cookie)
 {
 	memset(cookie, 0, sizeof(*cookie));
 	sx_init(&cookie->lock, "cookie lock");
@@ -101,22 +101,22 @@ compute_mac2(uint8_t mac2[COOKIE_LEN], const void *message, size_t len,
 
 static void
 make_cookie(uint8_t cookie[COOKIE_LEN], struct mbuf *m,
-    struct cookie_checker *checker)
+    struct wg_cookie_checker *checker)
 {
 	struct blake2s_state state;
 	uint16_t ether_type;
 
-	if (wg_birthdate_has_expired(checker->secret_birthdate,
+	if (wg_birthdate_has_expired(checker->wcc_birthdate,
 				     COOKIE_SECRET_MAX_AGE)) {
-		sx_xlock(&checker->secret_lock);
-		checker->secret_birthdate = gethrtime();
-		arc4random_buf(checker->secret, NOISE_HASH_LEN);
-		sx_xunlock(&checker->secret_lock);
+		sx_xlock(&checker->wcc_lock);
+		checker->wcc_birthdate = gethrtime();
+		arc4random_buf(checker->wcc_secret, NOISE_HASH_LEN);
+		sx_xunlock(&checker->wcc_lock);
 	}
 
-	sx_slock(&checker->secret_lock);
+	sx_slock(&checker->wcc_lock);
 
-	blake2s_init_key(&state, COOKIE_LEN, checker->secret, NOISE_HASH_LEN);
+	blake2s_init_key(&state, COOKIE_LEN, checker->wcc_secret, NOISE_HASH_LEN);
 	ether_type = eh_type(m);
 	if (ether_type == ETHERTYPE_IP)
 		blake2s_update(&state, (uint8_t *)&ip_hdr(m)->ip_src,
@@ -127,11 +127,11 @@ make_cookie(uint8_t cookie[COOKIE_LEN], struct mbuf *m,
 	blake2s_update(&state, (uint8_t *)&udp_hdr(m)->uh_sport, sizeof(uint16_t));
 	blake2s_final(&state, cookie);
 
-	sx_sunlock(&checker->secret_lock);
+	sx_sunlock(&checker->wcc_lock);
 }
 
 enum cookie_mac_state
-wg_cookie_validate_packet(struct cookie_checker *checker,
+wg_cookie_validate_packet(struct wg_cookie_checker *checker,
     struct mbuf *m, bool check_cookie)
 {
 	struct message_macs *macs = (struct message_macs *)
@@ -159,7 +159,7 @@ wg_cookie_validate_packet(struct cookie_checker *checker,
 
 	state = VALID_MAC_WITH_COOKIE_BUT_RATELIMITED;
 #ifdef notyet
-	if (!wg_ratelimiter_allow(m, dev_net(checker->device->dev)))
+	if (!wg_ratelimiter_allow(m, dev_net(checker->wcc_sc->dev)))
 		goto out;
 #endif
 	state = VALID_MAC_WITH_COOKIE;
@@ -195,7 +195,7 @@ wg_cookie_add_mac_to_packet(void *message, size_t len,
 
 void
 wg_cookie_message_create(struct message_handshake_cookie *dst,
-    struct mbuf *m, uint32_t index, struct cookie_checker *checker)
+    struct mbuf *m, uint32_t index, struct wg_cookie_checker *checker)
 {
 	struct message_macs *macs = (struct message_macs *)
 		((uint8_t *)m->m_data + m->m_len - sizeof(*macs));
@@ -208,18 +208,18 @@ wg_cookie_message_create(struct message_handshake_cookie *dst,
 	make_cookie(cookie, m, checker);
 	xchacha20poly1305_encrypt(dst->encrypted_cookie, cookie, COOKIE_LEN,
 				  macs->mac1, COOKIE_LEN, dst->nonce,
-				  checker->cookie_encryption_key);
+				  checker->wcc_encryption_key);
 }
 
 void
 wg_cookie_message_consume(struct message_handshake_cookie *src,
-    struct wg_device *wg)
+    struct wg_softc *sc)
 {
 	struct wg_peer *peer = NULL;
 	uint8_t cookie[COOKIE_LEN];
 	bool rc;
 
-	if (__predict_false(!wg_index_hashtable_lookup(wg->index_hashtable,
+	if (__predict_false(!wg_index_hashtable_lookup(sc->index_hashtable,
 						INDEX_HASHTABLE_HANDSHAKE |
 						INDEX_HASHTABLE_KEYPAIR,
 						src->receiver_index, &peer)))
@@ -246,7 +246,7 @@ wg_cookie_message_consume(struct message_handshake_cookie *src,
 	} else {
 #ifdef notyet
 		net_dbg_ratelimited("%s: Could not decrypt invalid cookie response\n",
-				    wg->dev->name);
+				    sc->dev->name);
 #endif
 	}
 

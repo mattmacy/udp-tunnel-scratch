@@ -3,20 +3,20 @@
 
 #include_next <sys/socket.h>
 
-struct wg_device;
+struct wg_softc;
 struct wg_peer;
 struct sock;
 struct endpoint;
 
 
-int wg_socket_init(struct wg_device *wg, uint16_t port);
-void wg_socket_reinit(struct wg_device *wg, struct sock *new4,
+int wg_socket_init(struct wg_softc *sc, uint16_t port);
+void wg_socket_reinit(struct wg_softc *sc, struct sock *new4,
 		      struct sock *new6);
 int wg_socket_send_buffer_to_peer(struct wg_peer *peer, void *data,
 				  size_t len, uint8_t ds);
 int wg_socket_send_m_to_peer(struct wg_peer *peer, struct mbuf *m,
 			       uint8_t ds);
-int wg_socket_send_buffer_as_reply_to_m(struct wg_device *wg,
+int wg_socket_send_buffer_as_reply_to_m(struct wg_softc *sc,
 					  struct mbuf *in_m,
 					  void *out_buffer, size_t len);
 

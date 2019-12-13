@@ -49,19 +49,12 @@ __FBSDID("$FreeBSD$");
 
 #include "ifdi_if.h"
 
-#include <sys/device.h>
 #include <sys/noise.h>
 #include <sys/ratelimiter.h>
 #include <sys/wg_module.h>
 #include <crypto/zinc.h>
 
 MALLOC_DEFINE(M_WG, "WG", "wireguard");
-
-struct wg_softc {
-	if_softc_ctx_t shared;
-	if_ctx_t wg_ctx;
-	struct ifnet *wg_ifp;
-};
 
 #define WG_CAPS														\
 	IFCAP_TSO |IFCAP_HWCSUM | IFCAP_VLAN_HWFILTER | IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWCSUM |	\
@@ -155,9 +148,9 @@ wg_module_init(void)
 	    !wg_ratelimiter_selftest())
 		return EDOOFUS;
 #endif
-	wg_noise_init();
+	wg_noise_param_init();
 
-	if ((rc = wg_device_init()))
+	if ((rc = wg_ctx_init()))
 		return (rc);
 
 	wg_pseudo = iflib_clone_register(wg_sctx);
@@ -170,7 +163,7 @@ wg_module_init(void)
 static void
 wg_module_deinit(void)
 {
-	wg_device_uninit();
+	wg_ctx_uninit();
 	iflib_clone_deregister(wg_pseudo);
 }
 

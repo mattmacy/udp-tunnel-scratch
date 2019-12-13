@@ -1,6 +1,5 @@
 #include "queueing.h"
 #include "timers.h"
-#include "device.h"
 #include "peer.h"
 #include "socket.h"
 #include "messages.h"
@@ -8,7 +7,6 @@
 
 #include <linux/simd.h>
 #include <linux/uio.h>
-#include <linux/inetdevice.h>
 #include <linux/socket.h>
 #include <net/ip_tunnels.h>
 #include <net/udp.h>

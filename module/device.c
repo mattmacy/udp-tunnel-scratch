@@ -269,7 +269,7 @@ wg_newlink(struct net *src_net, struct net_device *dev,
 		      struct netlink_ext_ack *extack)
 {
 	struct wg_device *wg = netdev_priv(dev);
-	int ret = -ENOMEM;
+	int rc = ENOMEM;
 
 	wg->creating_net = src_net;
 	init_rwsem(&wg->static_identity.lock);
@@ -279,11 +279,11 @@ wg_newlink(struct net *src_net, struct net_device *dev,
 	wg_whitelists_init(&wg->peer_whitelist);
 	wg_cookie_checker_init(&wg->cookie_checker, wg);
 	INIT_LIST_HEAD(&wg->peer_list);
-	wg->device_update_gen = 1;
+	wg->wd_gen = 1;
 
 	wg->peer_hashtable = wg_pubkey_hashtable_alloc();
 	if (!wg->peer_hashtable)
-		return ret;
+		return (rc);
 
 	wg->index_hashtable = wg_index_hashtable_alloc();
 	if (!wg->index_hashtable)
@@ -325,11 +325,11 @@ wg_newlink(struct net *src_net, struct net_device *dev,
 		goto err_free_encrypt_queue;
 
 	ret = wg_ratelimiter_init();
-	if (ret < 0)
+	if (rc)
 		goto err_free_decrypt_queue;
 
 	ret = register_netdevice(dev);
-	if (ret < 0)
+	if (rc)
 		goto err_uninit_ratelimiter;
 
 	list_add(&wg->device_list, &device_list);
@@ -340,7 +340,7 @@ wg_newlink(struct net *src_net, struct net_device *dev,
 	dev->priv_destructor = wg_destruct;
 
 	pr_debug("%s: Interface created\n", dev->name);
-	return ret;
+	return (rc);
 
 err_uninit_ratelimiter:
 	wg_ratelimiter_uninit();
@@ -362,7 +362,7 @@ err_free_index_hashtable:
 	kvfree(wg->index_hashtable);
 err_free_peer_hashtable:
 	kvfree(wg->peer_hashtable);
-	return ret;
+	return (rc);
 }
 
 #if 0

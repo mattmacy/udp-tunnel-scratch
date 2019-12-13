@@ -16,19 +16,19 @@ struct mbuf;
 struct work_struct;
 
 /* queueing.c APIs: */
-int wg_packet_queue_init(struct crypt_queue *queue, work_func_t function,
+int wg_packet_queue_init(struct crypt_queue *queue, gtask_fn_t function,
 			 bool multicore, unsigned int len);
 void wg_packet_queue_free(struct crypt_queue *queue, bool multicore);
 //struct multicore_worker /* __percpu */ *
-//wg_packet_percpu_multicore_worker_alloc(work_func_t function, void *ptr);
+//wg_packet_percpu_multicore_worker_alloc(gtask_fn_t function, void *ptr);
 
 /* receive.c APIs: */
 void wg_packet_receive(struct wg_device *wg, struct mbuf *m);
-void wg_packet_handshake_receive_worker(struct work_struct *work);
+//void wg_packet_handshake_receive_worker(struct work_struct *work);
 /* NAPI poll function: */
 //int wg_packet_rx_poll(struct napi_struct *napi, int budget);
 /* Workqueue worker: */
-void wg_packet_decrypt_worker(struct work_struct *work);
+//void wg_packet_decrypt_worker(struct work_struct *work);
 
 /* send.c APIs: */
 void wg_packet_send_queued_handshake_initiation(struct wg_peer *peer,
@@ -40,11 +40,12 @@ void wg_packet_send_handshake_cookie(struct wg_device *wg,
 void wg_packet_send_keepalive(struct wg_peer *peer);
 void wg_packet_purge_staged_packets(struct wg_peer *peer);
 void wg_packet_send_staged_packets(struct wg_peer *peer);
+#if 0
 /* Workqueue workers: */
 void wg_packet_handshake_send_worker(struct work_struct *work);
 void wg_packet_tx_worker(struct work_struct *work);
 void wg_packet_encrypt_worker(struct work_struct *work);
-
+#endif
 enum packet_state {
 	PACKET_STATE_UNCRYPTED,
 	PACKET_STATE_CRYPTED,
@@ -61,24 +62,7 @@ struct packet_cb {
 
 //#define PACKET_CB(m) ((struct packet_cb *)((m)->cb))
 //#define PACKET_PEER(m) (PACKET_CB(m)->keypair->entry.peer)
-
-/* Returns either the correct m->protocol value, or 0 if invalid. */
-static inline uint16_t
-wg_m_examine_untrusted_ip_hdr(struct mbuf *m)
-{
-	if (m_network_header(m) >= m->head &&
-	    (m_network_header(m) + sizeof(struct ip)) <=
-		    m_tail_pointer(m) &&
-	    ip_hdr(m)->version == 4)
-		return htons(ETH_P_IP);
-	if (m_network_header(m) >= m->head &&
-	    (m_network_header(m) + sizeof(struct ip6_hdr)) <=
-		    m_tail_pointer(m) &&
-	    ipv6_hdr(m)->version == 6)
-		return htons(ETH_P_IPV6);
-	return 0;
-}
-
+#if 0
 static inline void wg_reset_packet(struct mbuf *m)
 {
 	const int pfmemalloc = m->pfmemalloc;
@@ -187,7 +171,7 @@ static inline void wg_queue_enqueue_per_peer_napi(struct mbuf *m,
 	//napi_schedule(&peer->napi);
 	wg_peer_put(peer);
 }
-
+#endif
 #ifdef DEBUG
 bool wg_packet_counter_selftest(void);
 #endif
