@@ -30,6 +30,33 @@ struct crypt_queue {
 	};
 };
 
+/*
+ * Workaround FreeBSD's shitty typed atomic
+ * accessors
+ */
+#define __ATOMIC_LOAD_SIZE						\
+	({									\
+	switch (size) {							\
+	case 1: *(uint8_t *)res = *(volatile uint8_t *)p; break;		\
+	case 2: *(uint16_t *)res = *(volatile uint16_t *)p; break;		\
+	case 4: *(uint32_t *)res = *(volatile uint32_t *)p; break;		\
+	case 8: *(uint64_t *)res = *(volatile uint64_t *)p; break;		\
+	}								\
+})
+
+static inline void
+__atomic_load_acq_size(volatile void *p, void *res, int size)
+{
+	__ATOMIC_LOAD_SIZE;
+}
+
+#define atomic_load_acq(x)						\
+	({											\
+	union { __typeof(x) __val; char __c[1]; } __u;			\
+	__atomic_load_acq_size(&(x), __u.__c, sizeof(x));		\
+	__u.__val;												\
+})
+
 struct wg_softc {
 	if_softc_ctx_t shared;
 	if_ctx_t wg_ctx;
@@ -38,10 +65,11 @@ struct wg_softc {
 	struct noise_static_identity static_identity;
 	struct index_hashtable *index_hashtable;
 	struct pubkey_table *peer_hashtable;
-	struct mtx device_update_lock, socket_update_lock;
-	unsigned int wd_npeers, wd_gen;
-	CK_STAILQ_HEAD(, wg_peer) wd_peer_list;
-	struct whitelist wd_whitelist;
+	struct mtx wg_sc_lock;
+	struct mtx socket_update_lock;
+	unsigned int wg_npeers, wg_gen;
+	CK_STAILQ_HEAD(, wg_peer) wg_peer_list;
+	struct whitelist wg_whitelist;
 	//struct list_head device_list, peer_list;
 
 #if 0

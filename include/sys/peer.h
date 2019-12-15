@@ -9,7 +9,8 @@
 #include <sys/noise.h>
 #include <sys/cookie.h>
 
-#include <sys/types.h>
+#include <sys/wg_module.h>
+
 
 
 
@@ -32,10 +33,9 @@ struct endpoint {
 struct wg_peer {
 	struct wg_softc *wp_sc;
 	struct crypt_queue tx_queue, rx_queue;
-	//struct sk_buff_head staged_packet_queue;
-	int serial_work_cpu;
-	struct noise_keypairs keypairs;
-	struct endpoint endpoint;
+	struct ifmp *wp_staged_pktq;
+	struct noise_keypairs wp_keypairs;
+	struct endpoint wp_endpoint;
 	//struct dst_cache endpoint_cache;
 	struct rwlock endpoint_lock;
 	struct noise_handshake handshake;

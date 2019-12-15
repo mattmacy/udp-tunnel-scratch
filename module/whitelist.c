@@ -1,14 +1,16 @@
-#include "whitelist.h"
-#include "peer.h"
+#include <sys/endian.h>
+
+#include <sys/whitelist.h>
+#include <sys/peer.h>
 
 static void
 native_endian(uint8_t *dst, const uint8_t *src, uint8_t bits)
 {
 	if (bits == 32) {
-		*(u32 *)dst = ntohl(*(const __be32 *)src);
+		*(uint32_t *)dst = ntohl(*(const uint32_t *)src);
 	} else if (bits == 128) {
-		((uint64_t *)dst)[0] = be64_to_cpu(((const __be64 *)src)[0]);
-		((uint64_t *)dst)[1] = be64_to_cpu(((const __be64 *)src)[1]);
+		((uint64_t *)dst)[0] = be64toh(((const uint64_t *)src)[0]);
+		((uint64_t *)dst)[1] = be64toh(((const uint64_t *)src)[1]);
 	}
 }
 
@@ -23,38 +25,41 @@ copy_and_assign_cidr(struct whitelist_node *node, const uint8_t *src,
 #endif
 	node->bit_at_b = 7U - (cidr % 8U);
 	node->bitlen = bits;
-	memcpy(node->bits, src, bits / 8U);
+	memcpy(node->wn_bits, src, bits / 8U);
 }
 #define CHOOSE_NODE(parent, key) \
 	parent->bit[(key[parent->bit_at_a] >> parent->bit_at_b) & 1]
 
 static void
-node_free_rcu(struct rcu_head *rcu)
+node_free_deferred(epoch_context_t ctx)
 {
-	kfree(container_of(rcu, struct whitelist_node, rcu));
+	struct whitelist_node *node;
+
+	node = __containerof(ctx, struct whitelist_node, wn_epoch_ctx);
+	free(node, M_WG);
 }
 
 static void
 push_rcu(struct whitelist_node **stack,
-		     struct whitelist_node __rcu *p, unsigned int *len)
+		     volatile struct whitelist_node *p, unsigned int *len)
 {
-	if (rcu_access_pointer(p)) {
-		WARN_ON(IS_ENABLED(DEBUG) && *len >= 128);
-		stack[(*len)++] = rcu_dereference_raw(p);
+	if (p != NULL) {
+		MPASS(*len < 128);
+		stack[(*len)++] = __DEVOLATILE(void *, p);
 	}
 }
 
 static void
-root_free_rcu(struct rcu_head *rcu)
+root_free_rcu(epoch_context_t ctx)
 {
 	struct whitelist_node *node, *stack[128] = {
-		container_of(rcu, struct whitelist_node, rcu) };
+		__containerof(ctx, struct whitelist_node, wn_epoch_ctx) };
 	unsigned int len = 1;
 
 	while (len > 0 && (node = stack[--len])) {
-		push_rcu(stack, node->bit[0], &len);
-		push_rcu(stack, node->bit[1], &len);
-		kfree(node);
+		push_rcu(stack, node->wn_bit[0], &len);
+		push_rcu(stack, node->wn_bit[1], &len);
+		free(node, M_WG);
 	}
 }
 
@@ -65,25 +70,24 @@ root_remove_peer_lists(struct whitelist_node *root)
 	unsigned int len = 1;
 
 	while (len > 0 && (node = stack[--len])) {
-		push_rcu(stack, node->bit[0], &len);
-		push_rcu(stack, node->bit[1], &len);
-		if (rcu_access_pointer(node->peer))
+		push_rcu(stack, node->wn_bit[0], &len);
+		push_rcu(stack, node->wn_bit[1], &len);
+		if (atomic_load_acq(node->peer))
 			list_del(&node->peer_list);
 	}
 }
 
 static void
-walk_remove_by_peer(struct whitelist_node __rcu **top,
-				struct wg_peer *peer, struct mutex *lock)
+walk_remove_by_peer(struct whitelist_node **top,
+				struct wg_peer *peer, struct mtx *lock)
 {
-#define REF(p) rcu_access_pointer(p)
-#define DEREF(p) rcu_dereference_protected(*(p), lockdep_is_held(lock))
+#define REF(p) atomic_load_acq((p))
 #define PUSH(p) ({                                                             \
-		WARN_ON(IS_ENABLED(DEBUG) && len >= 128);                      \
-		stack[len++] = p;                                              \
+			MPASS(len < 128);											\
+			stack[len++] = p;											\
 	})
 
-	struct whitelist_node __rcu **stack[128], **nptr;
+	struct whitelist_node **stack[128], **nptr;
 	struct whitelist_node *node, *prev;
 	unsigned int len;
 
@@ -92,7 +96,7 @@ walk_remove_by_peer(struct whitelist_node __rcu **top,
 
 	for (prev = NULL, len = 0, PUSH(top); len > 0; prev = node) {
 		nptr = stack[len - 1];
-		node = DEREF(nptr);
+		node = *nptr;
 		if (!node) {
 			--len;
 			continue;
@@ -107,15 +111,13 @@ walk_remove_by_peer(struct whitelist_node __rcu **top,
 			if (REF(node->bit[1]))
 				PUSH(&node->bit[1]);
 		} else {
-			if (rcu_dereference_protected(node->peer,
-				lockdep_is_held(lock)) == peer) {
-				RCU_INIT_POINTER(node->peer, NULL);
+			if (node->peer == peer) {
+				node->peer = NULL;
 				list_del_init(&node->peer_list);
 				if (!node->bit[0] || !node->bit[1]) {
-					rcu_assign_pointer(*nptr, DEREF(
-					       &node->bit[!REF(node->bit[0])]));
+					*nptr = *&node->bit[!REF(node->bit[0])];
 					call_rcu(&node->rcu, node_free_rcu);
-					node = DEREF(nptr);
+					node = *nptr;
 				}
 			}
 			--len;
@@ -123,7 +125,6 @@ walk_remove_by_peer(struct whitelist_node __rcu **top,
 	}
 
 #undef REF
-#undef DEREF
 #undef PUSH
 }
 
@@ -138,7 +139,7 @@ common_bits(const struct whitelist_node *node, const uint8_t *key,
 		      uint8_t bits)
 {
 	if (bits == 32)
-		return 32U - fls(*(const u32 *)node->bits ^ *(const u32 *)key);
+		return 32U - fls(*(const uint32_t *)node->bits ^ *(const uint32_t *)key);
 	else if (bits == 128)
 		return 128U - fls128(
 			*(const uint64_t *)&node->bits[0] ^ *(const uint64_t *)&key[0],
@@ -166,7 +167,7 @@ find_node(struct whitelist_node *trie, uint8_t bits,
 	struct whitelist_node *node = trie, *found = NULL;
 
 	while (node && prefix_matches(node, key, bits)) {
-		if (rcu_access_pointer(node->peer))
+		if (atomic_load_acq(node->peer))
 			found = node;
 		if (node->cidr == bits)
 			break;
@@ -231,7 +232,7 @@ add(struct whitelist_node __rcu **trie, uint8_t bits, const uint8_t *key,
 	if (__predict_false(cidr > bits || !peer))
 		return (EINVAL);
 
-	if (!rcu_access_pointer(*trie)) {
+	if (!atomic_load_acq(trie)) {
 		node = kzalloc(sizeof(*node), GFP_KERNEL);
 		if (__predict_false(!node))
 			return (ENOMEM);
@@ -309,14 +310,14 @@ wg_whitelist_free(struct whitelist *table, struct mutex *lock)
 	++table->seq;
 	RCU_INIT_POINTER(table->root4, NULL);
 	RCU_INIT_POINTER(table->root6, NULL);
-	if (rcu_access_pointer(old4)) {
+	if (atomic_load_acq(old4)) {
 		struct whitelist_node *node = rcu_dereference_protected(old4,
 							lockdep_is_held(lock));
 
 		root_remove_peer_lists(node);
 		call_rcu(&node->rcu, root_free_rcu);
 	}
-	if (rcu_access_pointer(old6)) {
+	if (atomic_load_acq(old6)) {
 		struct whitelist_node *node = rcu_dereference_protected(old6,
 							lockdep_is_held(lock));
 
@@ -330,7 +331,7 @@ wg_whitelist_insert_v4(struct whitelist *table, const struct in_addr *ip,
 			    uint8_t cidr, struct wg_peer *peer, struct mutex *lock)
 {
 	/* Aligned so it can be passed to fls */
-	uint8_t key[4] __aligned(__alignof(u32));
+	uint8_t key[4] __aligned(__alignof(uint32_t));
 
 	++table->seq;
 	native_endian(key, (const uint8_t *)ip, 32);

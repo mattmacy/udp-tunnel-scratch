@@ -79,12 +79,53 @@ wg_cloneattach(if_ctx_t ctx, struct if_clone *ifc, const char *name, caddr_t par
 }
 
 static int
+wg_transmit(struct ifnet *ifp, struct mbuf *m)
+{
+	struct wg_softc *sc;
+	sa_family_t family;
+	int rc;
+
+	rc = 0;
+	sc = iflib_get_softc(ifp->if_softc);
+	ETHER_BPF_MTAP(ifp, m);
+	peer = wg_whitelist_lookup_dst(sc->wg_whitelist, m);
+	if (__predict_false(peer == NULL)) {
+		rc = ENOKEY;
+		/* XXX log */
+		goto err;
+	}
+	family = atomic_load_acq(peer->wp_endpoint.addr.sa_family);
+	if (__predict_false(family != AF_INET && family != AF_INET6)) {
+		rc = EHOSTUNREACH;
+		/* XXX log */
+		goto err_peer;
+	}
+	if (ifmp_ring_enqueue(peer->wp_staged_pktq, &m, 1, MAX_TX_BATCH) == ENOBUFS) {
+		m_free(m);
+		rc = ENOBUFS;
+	}
+	wg_peer_put(peer);
+	return (rc); 
+err_peer:
+	wg_peer_put(peer);
+err:
+	/* XXX send ICMP unreachable */
+	m_free(m);
+	return (rc);
+}
+
+
+static int
 wg_attach_post(if_ctx_t ctx)
 {
-	//if_t ifp;
+	struct ifnet *ifp;
+	struct wg_softc *sc;
 
-	//ifp = iflib_get_ifp(ctx);
+	sc = iflib_get_softc(ctx);
+	ifp = iflib_get_ifp(ctx);
 	//if_setmtu(ifp, ETHERMTU - 50);
+	ifp->if_transmit = wg_transmit; 
+	
 	return (0);
 }
 
@@ -99,11 +140,39 @@ wg_detach(if_ctx_t ctx)
 static void
 wg_init(if_ctx_t ctx)
 {
+	struct wg_softc *sc;
+	int rc;
+
+	sc = iflib_get_softc(ctx);
+	if ((rc = wg_socket_init(sc, sc->wg_rx_port))) {
+		/* XXX log error */
+		return;
+	}
+	mtx_lock(&sc->wg_sc_lock);
+	CK_STAILQ_FOREACH(&sc->wg_peer_list, ...) {
+		wg_pkt_staged_tx(peer);
+		if (peer->wp_keepalive_intvl)
+			wg_pkt_keepalive_tx(peer);
+	}
+	mtx_unlock(&sc->wg_sc_lock);
 }
 
 static void
 wg_stop(if_ctx_t ctx)
 {
+	struct wg_softc *sc;
+
+	mtx_lock(&sc->wg_sc_lock);
+	CK_STAILQ_FOREACH(&sc->wg_peer_list, ...) {
+		wg_staged_pktq_purge(peer);
+		wg_timers_stop(peer);
+		wg_noise_handshake_clear(&peer->handshake);
+		wg_noise_keypairs_clear(&peer->keypairs);
+		wg_noise_reset_last_sent_handshake(&peer->last_sent_handshake);
+	}
+	mtx_unlock(&sc->wg_sc_lock);
+	mbufq_drain(&sc->wg_rx_handshakes);
+	wg_socket_reinit(sc, NULL, NULL);
 }
 
 

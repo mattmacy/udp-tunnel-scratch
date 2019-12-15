@@ -1,6 +1,8 @@
 #ifndef _WG_WHITELIST_H
 #define _WG_WHITELIST_H
 
+#include <sys/types.h>
+#include <sys/epoch.h>
 #include <sys/lock.h>
 #include <sys/mutex.h>
 #include <netinet/in.h>
@@ -11,10 +13,12 @@ struct wg_peer;
 
 struct whitelist_node {
 	struct wg_peer  *peer;
-	uint8_t bits[16] __aligned(__alignof(uint64_t));
+	struct whitelist_node *wn_bit[2];
+	uint8_t wn_bits[16] __aligned(__alignof(uint64_t));
 	uint8_t cidr, bit_at_a, bit_at_b, bitlen;
 	union {
 		//struct list_head peer_list;
+		struct epoch_context wn_epoch_ctx;
 		//struct rcu_head rcu;
 	};
 };
