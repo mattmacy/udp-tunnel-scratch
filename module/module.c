@@ -125,7 +125,9 @@ wg_attach_post(if_ctx_t ctx)
 	ifp = iflib_get_ifp(ctx);
 	//if_setmtu(ifp, ETHERMTU - 50);
 	ifp->if_transmit = wg_transmit; 
-	
+	CK_STAILQ_INIT(&sc->wg_peer_list);
+	mtx_init(&sc->wg_socket_lock);
+		
 	return (0);
 }
 
@@ -145,16 +147,14 @@ wg_init(if_ctx_t ctx)
 
 	sc = iflib_get_softc(ctx);
 	if ((rc = wg_socket_init(sc, sc->wg_rx_port))) {
-		/* XXX log error */
+		/* XXX log rc error */
 		return;
 	}
-	mtx_lock(&sc->wg_sc_lock);
 	CK_STAILQ_FOREACH(&sc->wg_peer_list, ...) {
 		wg_pkt_staged_tx(peer);
 		if (peer->wp_keepalive_intvl)
 			wg_pkt_keepalive_tx(peer);
 	}
-	mtx_unlock(&sc->wg_sc_lock);
 }
 
 static void
@@ -162,7 +162,6 @@ wg_stop(if_ctx_t ctx)
 {
 	struct wg_softc *sc;
 
-	mtx_lock(&sc->wg_sc_lock);
 	CK_STAILQ_FOREACH(&sc->wg_peer_list, ...) {
 		wg_staged_pktq_purge(peer);
 		wg_timers_stop(peer);
@@ -170,7 +169,6 @@ wg_stop(if_ctx_t ctx)
 		wg_noise_keypairs_clear(&peer->keypairs);
 		wg_noise_reset_last_sent_handshake(&peer->last_sent_handshake);
 	}
-	mtx_unlock(&sc->wg_sc_lock);
 	mbufq_drain(&sc->wg_rx_handshakes);
 	wg_socket_reinit(sc, NULL, NULL);
 }

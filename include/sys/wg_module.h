@@ -65,17 +65,17 @@ struct wg_softc {
 	struct noise_static_identity static_identity;
 	struct index_hashtable *index_hashtable;
 	struct pubkey_table *peer_hashtable;
-	struct mtx wg_sc_lock;
-	struct mtx socket_update_lock;
+	struct mtx wg_socket_lock;
 	unsigned int wg_npeers, wg_gen;
 	CK_STAILQ_HEAD(, wg_peer) wg_peer_list;
 	struct whitelist wg_whitelist;
 	//struct list_head device_list, peer_list;
+	struct socket *wg_sock4;
+	struct socket *wg_sock6;
+	
 
 #if 0
-	struct net_device *dev;
 	struct crypt_queue encrypt_queue, decrypt_queue;
-	struct sock __rcu *sock4, *sock6;
 	struct net *creating_net;
 	struct workqueue_struct *handshake_receive_wq, *handshake_send_wq;
 	struct workqueue_struct *packet_crypt_wq;
