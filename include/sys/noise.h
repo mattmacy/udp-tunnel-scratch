@@ -37,17 +37,17 @@ struct noise_keypair {
 };
 
 struct noise_keypairs {
-	struct noise_keypair /* __rcu */ *current_keypair;
-	struct noise_keypair /* __rcu */ *previous_keypair;
-	struct noise_keypair /* __rcu */ *next_keypair;
-	struct mtx keypair_update_lock;
+	struct noise_keypair *nks_current;
+	struct noise_keypair *nks_previous;
+	struct noise_keypair *nks_next;
+	struct mtx nks_lock;
 };
 
-struct noise_static_identity {
-	uint8_t static_public[NOISE_PUBLIC_KEY_LEN];
-	uint8_t static_private[NOISE_PUBLIC_KEY_LEN];
-	struct sx nsi_lock;
-	bool has_identity;
+struct noise_local {
+	uint8_t nl_public[NOISE_PUBLIC_KEY_LEN];
+	uint8_t nl_private[NOISE_PUBLIC_KEY_LEN];
+	struct sx nl_lock;
+	bool nl_has_identity;
 };
 
 enum noise_handshake_state {

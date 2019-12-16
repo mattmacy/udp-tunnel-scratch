@@ -57,21 +57,35 @@ __atomic_load_acq_size(volatile void *p, void *res, int size)
 	__u.__val;												\
 })
 
+
+
+struct wg_hashtable {
+	struct mtx			 h_mtx;
+	SIPHASH_KEY			 h_secret;
+	LIST_HEAD(, wg_peer)		*h_peers;
+	u_long				 h_peers_mask;
+	size_t				 h_num_peers;
+	LIST_HEAD(, noise_keypair)	*h_keys;
+	u_long				 h_keys_mask;
+	size_t				 h_num_keys;
+};
+
 struct wg_softc {
 	if_softc_ctx_t shared;
 	if_ctx_t wg_ctx;
 	struct ifnet *wg_ifp;
 
-	struct noise_static_identity static_identity;
-	struct index_hashtable *index_hashtable;
-	struct pubkey_table *peer_hashtable;
-	struct mtx wg_socket_lock;
+	struct wg_socket *wg_socket;
+	struct wg_hashtable wg_table;
+	struct noise_local sc_local;
 	unsigned int wg_npeers, wg_gen;
-	CK_STAILQ_HEAD(, wg_peer) wg_peer_list;
+	CK_LIST_HEAD(, wg_peer) wg_peer_list;
+	CK_LIST_HEAD(, noise_keypair) wg_keypair_list;
 	struct whitelist wg_whitelist;
-	//struct list_head device_list, peer_list;
-	struct socket *wg_sock4;
-	struct socket *wg_sock6;
+	struct mbufq wg_handshake_queue;
+	struct gtask wg_handshake_task;
+	struct wg_cookie_checker wg_cookie_checker;
+
 	
 
 #if 0

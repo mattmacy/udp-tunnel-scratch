@@ -8,6 +8,14 @@ struct wg_peer;
 struct sock;
 struct endpoint;
 
+struct wg_socket {
+	struct mtx	 so_mtx;
+	uint8_t		 so_rdomain;
+	in_port_t	 so_port;
+	struct socket	*so_so4;
+	struct socket	*so_so6;
+};
+
 
 int wg_socket_init(struct wg_softc *sc, uint16_t port);
 void wg_socket_reinit(struct wg_softc *sc, struct sock *new4,

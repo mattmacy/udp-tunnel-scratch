@@ -125,7 +125,7 @@ wg_attach_post(if_ctx_t ctx)
 	ifp = iflib_get_ifp(ctx);
 	//if_setmtu(ifp, ETHERMTU - 50);
 	ifp->if_transmit = wg_transmit; 
-	CK_STAILQ_INIT(&sc->wg_peer_list);
+	CK_LIST_INIT(&sc->wg_peer_list);
 	mtx_init(&sc->wg_socket_lock);
 		
 	return (0);
@@ -135,7 +135,15 @@ wg_attach_post(if_ctx_t ctx)
 static int
 wg_detach(if_ctx_t ctx)
 {
+	struct wg_softc *sc;
+
+	sc = iflib_get_softc(ctx);
+	sc->wg_accept_port = 0;
+	wg_socket_reinit(sc, NULL, NULL);
+	wg_peer_remove_all(sc);
+	
 	atomic_add_int(&clone_count, -1);
+
 	return (0);
 }
 
@@ -162,7 +170,7 @@ wg_stop(if_ctx_t ctx)
 {
 	struct wg_softc *sc;
 
-	CK_STAILQ_FOREACH(&sc->wg_peer_list, ...) {
+	CK_LIST_FOREACH(&sc->wg_peer_list, ...) {
 		wg_staged_pktq_purge(peer);
 		wg_timers_stop(peer);
 		wg_noise_handshake_clear(&peer->handshake);
