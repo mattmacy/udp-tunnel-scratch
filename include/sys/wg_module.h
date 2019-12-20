@@ -10,9 +10,66 @@
 #include <net/iflib.h>
 
 #include <sys/whitelist.h>
-#include <sys/noise.h>
+#include <crypto/curve25519.h>
+#include <zinc/chacha20poly1305.h>
+#include <crypto/blake2s.h>
 
 MALLOC_DECLARE(M_WG);
+
+
+typedef struct {
+	uint64_t	k0;
+	uint64_t	k1;
+} SIPHASH_KEY;
+
+
+enum noise_lengths {
+	NOISE_PUBLIC_KEY_LEN = CURVE25519_KEY_SIZE,
+	NOISE_SYMMETRIC_KEY_LEN = CHACHA20POLY1305_KEY_SIZE,
+	NOISE_TIMESTAMP_LEN = sizeof(uint64_t) + sizeof(uint32_t),
+	NOISE_AUTHTAG_LEN = CHACHA20POLY1305_AUTHTAG_SIZE,
+	NOISE_HASH_LEN = BLAKE2S_HASH_SIZE
+};
+
+#define noise_encrypted_len(plain_len) ((plain_len) + NOISE_AUTHTAG_LEN)
+
+enum cookie_values {
+	COOKIE_SECRET_MAX_AGE = 2 * 60,
+	COOKIE_SECRET_LATENCY = 5,
+	COOKIE_NONCE_LEN = XCHACHA20POLY1305_NONCE_SIZE,
+	COOKIE_LEN = 16
+};
+
+enum counter_values {
+	COUNTER_BITS_TOTAL = 2048,
+	COUNTER_REDUNDANT_BITS = __LONG_BIT,
+	COUNTER_WINDOW_SIZE = COUNTER_BITS_TOTAL - COUNTER_REDUNDANT_BITS
+};
+
+enum limits {
+	REKEY_AFTER_MESSAGES = 1ULL << 60,
+	REJECT_AFTER_MESSAGES = __UQUAD_MAX - COUNTER_WINDOW_SIZE - 1,
+	REKEY_TIMEOUT = 5,
+	//REKEY_TIMEOUT_JITTER_MAX_JIFFIES = HZ / 3,
+	REKEY_AFTER_TIME = 120,
+	REJECT_AFTER_TIME = 180,
+	INITIATIONS_PER_SECOND = 50,
+	MAX_PEERS_PER_DEVICE = 1U << 20,
+	KEEPALIVE_TIMEOUT = 10,
+	MAX_TIMER_HANDSHAKES = 90 / REKEY_TIMEOUT,
+	MAX_QUEUED_INCOMING_HANDSHAKES = 4096, /* TODO: replace this with DQL */
+	MAX_STAGED_PACKETS = 128,
+	MAX_QUEUED_PACKETS = 1024 /* TODO: replace this with DQL */
+};
+
+enum message_type {
+	MESSAGE_INVALID = 0,
+	MESSAGE_HANDSHAKE_INITIATION = 1,
+	MESSAGE_HANDSHAKE_RESPONSE = 2,
+	MESSAGE_HANDSHAKE_COOKIE = 3,
+	MESSAGE_DATA = 4
+};
+
 #define zfree(addr, type)						\
 	do {										\
 		explicit_bzero(addr, sizeof(*addr));	\
@@ -58,7 +115,7 @@ __atomic_load_acq_size(volatile void *p, void *res, int size)
 })
 
 
-
+#if 0
 struct wg_hashtable {
 	struct mtx			 h_mtx;
 	SIPHASH_KEY			 h_secret;
@@ -69,7 +126,9 @@ struct wg_hashtable {
 	u_long				 h_keys_mask;
 	size_t				 h_num_keys;
 };
+#endif
 
+#ifdef notyet
 struct wg_softc {
 	if_softc_ctx_t shared;
 	if_ctx_t wg_ctx;
@@ -103,6 +162,7 @@ struct wg_softc {
 	bool have_creating_net_ref;
 #endif
 };
+#endif
 
 int wg_ctx_init(void);
 void wg_ctx_uninit(void);

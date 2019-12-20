@@ -25,6 +25,7 @@ struct noise_symmetric_key {
 	bool is_valid;
 };
 
+#if 0
 struct noise_keypair {
 	struct index_hashtable_entry nk_entry;
 	struct noise_symmetric_key nk_send;
@@ -35,7 +36,7 @@ struct noise_keypair {
 	volatile int nk_refcount;
 	struct epoch_context nk_epoch_ctx;
 };
-
+#endif
 struct noise_keypairs {
 	struct noise_keypair *nks_current;
 	struct noise_keypair *nks_previous;
@@ -50,6 +51,7 @@ struct noise_local {
 	bool nl_has_identity;
 };
 
+#if 0
 enum noise_handshake_state {
 	HANDSHAKE_ZEROED,
 	HANDSHAKE_CREATED_INITIATION,
@@ -57,6 +59,7 @@ enum noise_handshake_state {
 	HANDSHAKE_CREATED_RESPONSE,
 	HANDSHAKE_CONSUMED_RESPONSE
 };
+#endif
 
 struct noise_handshake {
 	struct index_hashtable_entry nh_entry;

@@ -24,7 +24,7 @@
 #include <sys/mutex.h>
 #include <crypto/siphash/siphash.h>
 
-
+#include <sys/wg_module.h>
 /* This is only needed for wg_keypair. */
 #include <sys/if_wg_session.h>
 
@@ -40,7 +40,7 @@
 
 /* Constant for session */
 #define COUNTER_TYPE		int
-#define COUNTER_BITS_TOTAL	256
+//#define COUNTER_BITS_TOTAL	256
 #define COUNTER_TYPE_BITS	(sizeof(COUNTER_TYPE) * 8)
 #define COUNTER_TYPE_NUM	(COUNTER_BITS_TOTAL / COUNTER_TYPE_BITS)
 #define COUNTER_WINDOW_SIZE	(COUNTER_BITS_TOTAL - COUNTER_TYPE_BITS)
@@ -56,8 +56,8 @@
 #define KEEPALIVE_TIMEOUT		10
 #define MAX_TIMER_HANDSHAKES		(90 / REKEY_TIMEOUT)
 #define NEW_HANDSHAKE_TIMEOUT		(REKEY_TIMEOUT + KEEPALIVE_TIMEOUT)
-#define COOKIE_SECRET_MAX_AGE		120
-#define COOKIE_SECRET_LATENCY		5
+//#define COOKIE_SECRET_MAX_AGE		120
+//#define COOKIE_SECRET_LATENCY		5
 
 #define MAX_QUEUED_INCOMING_HANDSHAKES	4096 /* TODO: replace this with DQL */
 #define MAX_STAGED_PACKETS		256
@@ -65,6 +65,9 @@
 
 #define HASHTABLE_PEER_SIZE		(1 << 6)			//1 << 11
 #define HASHTABLE_INDEX_SIZE		(HASHTABLE_PEER_SIZE * 3)	//1 << 13
+
+
+typedef void timeout_t (void *);
 
 /* Socket */
 struct wg_endpoint {
@@ -181,7 +184,7 @@ struct wg_counter {
 	struct mtx	c_mtx;
 	uint64_t	c_send;
 	uint64_t	c_recv;
-	COUNTER_TYPE	c_backtrack[COUNTER_TYPE_NUM];
+	COUNTER_TYPE	c_backtrack[COUNTER_BITS_TOTAL / __LONG_BIT];
 };
 
 /* Timers */
@@ -207,13 +210,13 @@ enum route_direction {
 
 struct wg_route_table {
 	size_t 		 t_count;
-	struct art_root	*t_ip;
-	struct art_root	*t_ip6;
+	struct radix_node_head	*t_ip;
+	struct radix_node_head	*t_ip6;
 };
 
 struct wg_route {
 	struct radix_node		 r_node;
-	SLIST_ENTRY(wg_route)	 r_entry;
+	CK_LIST_ENTRY(wg_route)	 r_entry;
 	struct wg_cidr		 r_cidr;
 	struct wg_peer		*r_peer;
 };
@@ -223,6 +226,7 @@ struct wg_route {
 #define IDENTIFIER_NAME "WireGuard v1 zx2c4 Jason@zx2c4.com"
 
 /* TODO s/HANDSHAKE/KEYPAIR/g */
+
 enum noise_keypair_state {
 	HANDSHAKE_ZEROED = 0,
 	HANDSHAKE_CREATED_INITIATION,
@@ -232,6 +236,7 @@ enum noise_keypair_state {
 	KEYPAIR_INITIATOR,
 	KEYPAIR_RESPONDER,
 };
+
 
 struct noise_keypair {
 	LIST_ENTRY(noise_keypair)	 k_entry;
@@ -352,7 +357,7 @@ struct wg_peer {
 
 	struct cpumem *		 p_counters;
 
-	SLIST_HEAD(, wg_route)	 p_routes;
+	CK_LIST_HEAD(, wg_route)	 p_routes;
 };
 
 struct wg_hashtable {

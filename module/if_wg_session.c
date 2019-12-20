@@ -37,6 +37,7 @@
 #include <net/pfvar.h>
 #include <sys/if_wg_session.h>
 #include <sys/if_wg_session_vars.h>
+#include <sys/wg_module.h>
 
 #include <netinet/in.h>
 #include <netinet/ip.h>
@@ -116,7 +117,7 @@ void	wg_queue_pkt_done(struct wg_queue_pkt *);
 #endif
 
 /* Route */
-void	wg_route_init(struct wg_route_table *);
+int	wg_route_init(struct wg_route_table *);
 void	wg_route_destroy(struct wg_route_table *);
 int	wg_route_add(struct wg_route_table *, struct wg_peer *,
 			     struct wg_cidr *);
@@ -864,60 +865,69 @@ wg_queue_pkt_done(struct wg_queue_pkt *p)
 #endif
 
 /* Route */
-void
+int
 wg_route_init(struct wg_route_table *tbl)
 {
+	int rc;
+
 	tbl->t_count = 0;
-	tbl->t_ip = art_alloc(0, 32, 0);
-	tbl->t_ip6 = art_alloc(0, 128, 0);
+	rc = rn_inithead((void **)&tbl->t_ip,
+	    offsetof(struct sockaddr_in, sin_addr) * NBBY);
+	if (rc == 0)
+		return (ENOMEM);
+#ifdef INET6
+	rc = rn_inithead((void **)&tbl->t_ip6,
+	    offsetof(struct sockaddr_in6, sin6_addr) * NBBY);
+#endif
+	if (rc == 0) {
+		free(tbl->t_ip, M_RTABLE);
+		return (ENOMEM);
+	}
+	return (0);
 }
 
 void
 wg_route_destroy(struct wg_route_table *tbl)
 {
-	free(tbl->t_ip, M_RTABLE, sizeof(*tbl->t_ip));
-	free(tbl->t_ip6, M_RTABLE, sizeof(*tbl->t_ip6));
+	free(tbl->t_ip, M_RTABLE);
+	free(tbl->t_ip6, M_RTABLE);
 }
 
 int
 wg_route_add(struct wg_route_table *tbl, struct wg_peer *peer,
 	     struct wg_cidr *cidr)
 {
-	int ret = 0;
-	struct art_node	*node;
-	struct art_root	*root;
+	struct radix_node	*node;
+	struct radix_node_head	*root;
 	struct wg_route *route;
+	bool needfree = false;
 
 	if (cidr->c_af == AF_INET)
 		root = tbl->t_ip;
 	else if (cidr->c_af == AF_INET6)
 		root = tbl->t_ip6;
 	else
-		return EINVAL;
+		return (EINVAL);
 
-	if ((route = pool_get(&wg_route_pool, PR_NOWAIT)) == NULL)
-		return ENOBUFS;
+	route = malloc(sizeof(*route), M_WG, M_NOWAIT|M_ZERO);
+	if (__predict_false(route == NULL))
+		return (ENOBUFS);
 
-	bzero(route, sizeof(*route));
-
-	rw_wlock(&root->ar_lock);
-
-	node = art_insert(root, &route->r_node, &cidr->c_ip, cidr->c_mask);
-
+	RADIX_NODE_HEAD_LOCK(root);
+	node = root->rnh_addaddr(&cidr->c_ip, &cidr->c_mask, &root->rh,
+							&route->r_node);
 	if (node == &route->r_node) {
 		tbl->t_count++;
-		SLIST_INSERT_HEAD(&peer->p_routes, route, r_entry);
+		CK_LIST_INSERT_HEAD(&peer->p_routes, route, r_entry);
 		route->r_peer = wg_peer_ref(peer);
 		route->r_cidr = *cidr;
 	} else {
-		pool_put(&wg_route_pool, route);
-
-		route = (struct wg_route *) node;
-		if (route->r_peer != peer)
-			ret = EEXIST;
+		needfree = true;
 	}
-	rw_wunlock(&root->ar_lock);
-	return ret;
+	RADIX_NODE_HEAD_UNLOCK(root);
+	if (needfree)
+		free(route, M_WG);
+	return (0);
 }
 
 int
@@ -925,10 +935,10 @@ wg_route_delete(struct wg_route_table *tbl, struct wg_peer *peer,
 		struct wg_cidr *cidr)
 {
 	int ret = 0;
-	struct srp_ref	sr;
-	struct art_node	*node;
-	struct art_root	*root;
-	struct wg_route *route;
+	struct radix_node	*node;
+	struct radix_node_head	*root;
+	struct wg_route *route = NULL;
+	bool needfree = false;
 
 	if (cidr->c_af == AF_INET)
 		root = tbl->t_ip;
@@ -937,11 +947,11 @@ wg_route_delete(struct wg_route_table *tbl, struct wg_peer *peer,
 	else
 		return EINVAL;
 
-	rw_wlock(&root->ar_lock);
 
-	if ((node = art_lookup(root, &cidr->c_ip, cidr->c_mask, &sr)) != NULL) {
+	RADIX_NODE_HEAD_LOCK(root);
+	if ((node = root->rnh_matchaddr(&cidr->c_ip, &root->rh)) != NULL) {
 
-		if (art_delete(root, node, &cidr->c_ip, cidr->c_mask) == NULL)
+		if (root->rnh_deladdr(&cidr->c_ip, &cidr->c_mask, &root->rh) == NULL)
 			panic("art_delete failed to delete node %p", node);
 
 		/* We can type alias as node is the first elem in route */
@@ -949,9 +959,9 @@ wg_route_delete(struct wg_route_table *tbl, struct wg_peer *peer,
 
 		if (route->r_peer == peer) {
 			tbl->t_count--;
-			SLIST_REMOVE(&peer->p_routes, route, wg_route, r_entry);
+			CK_LIST_REMOVE(route, r_entry);
 			wg_peer_put(route->r_peer);
-			pool_put(&wg_route_pool, route);
+			needfree = true;
 		} else {
 			ret = EHOSTUNREACH;
 		}
@@ -959,8 +969,9 @@ wg_route_delete(struct wg_route_table *tbl, struct wg_peer *peer,
 	} else {
 		ret = ENOATTR;
 	}
-	srp_leave(&sr);
-	rw_wunlock(&root->ar_lock);
+	RADIX_NODE_HEAD_UNLOCK(root);
+	if (needfree)
+		free(route, M_WG);
 	return ret;
 }
 
@@ -968,45 +979,42 @@ struct wg_peer *
 wg_route_lookup(struct wg_route_table *tbl, struct mbuf *m,
 		enum route_direction dir)
 {
+	RADIX_NODE_HEAD_RLOCK_TRACKER;
 	struct ip *iphdr;
 	struct ip6_hdr *ip6hdr;
-	struct art_node	*node;
-	struct srp_ref	sr;
+	struct radix_node_head *root;
+	struct radix_node	*node;
 	struct wg_peer	*peer = NULL;
+	void *addr;
+	int version;
 
-	switch (m->m_pkthdr.ph_family) {
-	case AF_INET:
-		iphdr = mtod(m, struct ip *);
-		rw_rlock(&tbl->t_ip->ar_lock);
+	iphdr = mtod(m, struct ip *);
+	version = iphdr->ip_v;
+
+	if (__predict_false(dir != IN && dir != OUT))
+		panic("invalid route dir: %d\n", dir);
+
+	if (version == 4) {
+		root = tbl->t_ip;
 		if (dir == IN)
-			node = art_match(tbl->t_ip, &iphdr->ip_src, &sr);
-		else if(dir == OUT)
-			node = art_match(tbl->t_ip, &iphdr->ip_dst, &sr);
+			addr = &iphdr->ip_src;
 		else
-			panic("invalid route dir: %d\n", dir);
-		rw_runlock(&tbl->t_ip->ar_lock);
-		break;
-	case AF_INET6:
+			addr = &iphdr->ip_dst;
+	} else if (version == 6) {
 		ip6hdr = mtod(m, struct ip6_hdr *);
-		rw_rlock(&tbl->t_ip6->ar_lock);
+		root = tbl->t_ip6;
 		if (dir == IN)
-			node = art_match(tbl->t_ip6, &ip6hdr->ip6_dst, &sr);
-		else if (dir == OUT)
-			node = art_match(tbl->t_ip6, &ip6hdr->ip6_src, &sr);
+			addr = &ip6hdr->ip6_src;
 		else
-			panic("invalid route dir: %d\n", dir);
-		rw_runlock(&tbl->t_ip6->ar_lock);
-		break;
-	default:
-		return NULL;
-	}
+			addr = &ip6hdr->ip6_dst;
+	} else
+		return (NULL);
 
-	if (node != NULL)
+	RADIX_NODE_HEAD_RLOCK(root);
+	if ((node = root->rnh_matchaddr(addr, &root->rh)) != NULL)
 		peer = wg_peer_ref(((struct wg_route *) node)->r_peer);
-
-	srp_leave(&sr);
-
-	return peer;
+	RADIX_NODE_HEAD_RUNLOCK(root);
+	return (peer);
 }
 
 /* Hashtable */
@@ -1021,23 +1029,23 @@ wg_route_lookup(struct wg_route_table *tbl, struct mbuf *m,
 void
 wg_hashtable_init(struct wg_hashtable *ht)
 {
-	mtx_init(&ht->h_mtx, IPL_NET);
+	mtx_init(&ht->h_mtx, "hash lock", NULL, MTX_DEF);
 	arc4random_buf(&ht->h_secret, sizeof(ht->h_secret));
 	ht->h_num_peers = 0;
 	ht->h_num_keys = 0;
-	ht->h_peers = hashinit(HASHTABLE_PEER_SIZE, M_DEVBUF, M_WAIT,
+	ht->h_peers = hashinit(HASHTABLE_PEER_SIZE, M_DEVBUF,
 			&ht->h_peers_mask);
-	ht->h_keys = hashinit(HASHTABLE_INDEX_SIZE, M_DEVBUF, M_WAIT,
+	ht->h_keys = hashinit(HASHTABLE_INDEX_SIZE, M_DEVBUF,
 			&ht->h_keys_mask);
 }
 
 void
 wg_hashtable_destroy(struct wg_hashtable *ht)
 {
-	KASSERT(ht->h_num_peers == 0);
-	KASSERT(ht->h_num_keys == 0);
-	hashfree(ht->h_peers, HASHTABLE_PEER_SIZE, M_DEVBUF);
-	hashfree(ht->h_keys, HASHTABLE_INDEX_SIZE, M_DEVBUF);
+	MPASS(ht->h_num_peers == 0);
+	MPASS(ht->h_num_keys == 0);
+	hashdestroy(ht->h_peers, M_DEVBUF, ht->h_peers_mask);
+	hashdestroy(ht->h_keys, M_DEVBUF, ht->h_keys_mask);
 }
 
 void
@@ -1177,8 +1185,9 @@ noise_keypair_create(void)
 {
 	struct noise_keypair *keypair;
 
-	if ((keypair = pool_get(&noise_keypair_pool, PR_NOWAIT)) == NULL)
-		return NULL;
+	keypair = malloc(sizeof(*keypair), M_WG, M_NOWAIT|M_ZERO);
+	if (__predict_false(keypair == NULL);
+		return (NULL);
 
 	refcnt_init(&keypair->k_refcnt);
 	keypair->k_id = keypair_counter++;
