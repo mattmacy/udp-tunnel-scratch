@@ -373,7 +373,7 @@ struct wg_hashtable {
 
 /* Softc */
 struct wg_softc {
-	struct ifnet 		 sc_if;
+	struct ifnet 		 *sc_ifp;
 
 	struct wg_socket	 sc_socket;
 	struct wg_hashtable	 sc_hashtable;

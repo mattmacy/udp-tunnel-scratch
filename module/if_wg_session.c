@@ -30,6 +30,7 @@
 #include <sys/lock.h>
 #include <sys/rwlock.h>
 #include <sys/protosw.h>
+#include <sys/endian.h>
 
 #include <net/if.h>
 #include <net/if_var.h>
@@ -64,6 +65,13 @@
 
 #define DPRINTF(sc, s, ...)
 
+static inline uint64_t
+siphash24(const SIPHASH_KEY *key, const void *src, size_t len)
+{
+	SIPHASH_CTX ctx;
+
+	return (SipHashX(&ctx, 2, 4, (const uint8_t *)key, src, len));
+}
 
 /* Counter */
 void		wg_counter_init(struct wg_counter *);
@@ -295,7 +303,7 @@ struct pool noise_keypair_pool;
 struct pool wg_route_pool;
 
 uint64_t keypair_counter = 0;
-uint64_t peer_counter = 0;
+static volatile unsigned long peer_counter = 0;
 
 
 static inline int
@@ -1052,7 +1060,7 @@ void
 wg_hashtable_peer_insert(struct wg_hashtable *ht, struct wg_peer *peer)
 {
 	uint64_t key;
-	key = SipHash24(&ht->h_secret, peer->p_remote.r_public,
+	key = siphash24(&ht->h_secret, peer->p_remote.r_public,
 			sizeof(peer->p_remote.r_public));
 
 	mtx_lock(&ht->h_mtx);
@@ -1069,7 +1077,7 @@ wg_hashtable_peer_lookup(struct wg_hashtable *ht,
 	uint64_t key;
 	struct wg_peer *i, *peer = NULL;
 
-	key = SipHash24(&ht->h_secret, pubkey, WG_KEY_SIZE);
+	key = siphash24(&ht->h_secret, pubkey, WG_KEY_SIZE);
 
 	mtx_lock(&ht->h_mtx);
 	LIST_FOREACH(i, &ht->h_peers[key & ht->h_peers_mask], p_entry) {
@@ -1150,7 +1158,7 @@ void
 noise_remote_init(struct noise_remote *remote, uint8_t pubkey[WG_KEY_SIZE])
 {
 	bzero(remote, sizeof(*remote));
-	mtx_init(&remote->r_mtx, IPL_NET);
+	mtx_init(&remote->r_mtx, "noise remote", NULL, MTX_DEF);
 	memcpy(remote->r_public, pubkey, WG_KEY_SIZE);
 }
 
@@ -1186,16 +1194,16 @@ noise_keypair_create(void)
 	struct noise_keypair *keypair;
 
 	keypair = malloc(sizeof(*keypair), M_WG, M_NOWAIT|M_ZERO);
-	if (__predict_false(keypair == NULL);
+	if (__predict_false(keypair == NULL))
 		return (NULL);
 
-	refcnt_init(&keypair->k_refcnt);
+	refcount_init(&keypair->k_refcnt, 0);
 	keypair->k_id = keypair_counter++;
 	keypair->k_peer = NULL;
 
 	wg_counter_init(&keypair->k_counter);
 	getnanotime(&keypair->k_birthdate);
-	mtx_init(&keypair->k_mtx, IPL_NET);
+	mtx_init(&keypair->k_mtx, "keypair lock", NULL, MTX_DEF);
 	keypair->k_state = HANDSHAKE_ZEROED;
 
 	return keypair;
@@ -1207,7 +1215,7 @@ noise_keypair_attach_to_peer(struct noise_keypair *keypair,
 {
 	mtx_lock(&keypair->k_mtx);
 
-	KASSERT(keypair->k_peer == NULL);
+	MPASS(keypair->k_peer == NULL);
 	keypair->k_peer = wg_peer_ref(peer);
 	noise_keypairs_insert_new(&peer->p_keypairs, keypair);
 	wg_hashtable_keypair_insert(&peer->p_sc->sc_hashtable, keypair);
@@ -1222,7 +1230,7 @@ struct noise_keypair *
 noise_keypair_ref(struct noise_keypair *keypair)
 {
 	if (keypair != NULL)
-		refcnt_take(&keypair->k_refcnt);
+		refcount_acquire(&keypair->k_refcnt);
 
 	return keypair;
 }
@@ -1231,7 +1239,7 @@ void
 noise_keypair_put(struct noise_keypair *keypair)
 {
 	if (keypair != NULL)
-		if (refcnt_rele(&keypair->k_refcnt))
+		if (refcount_release(&keypair->k_refcnt))
 			noise_keypair_free(keypair);
 }
 
@@ -1255,15 +1263,14 @@ noise_keypair_free(struct noise_keypair *keypair)
 	DPRINTF(keypair->k_peer->p_sc, "Keypair %llu destroyed\n",
 		keypair->k_id);
 	wg_peer_put(keypair->k_peer);
-	explicit_bzero(keypair, sizeof(*keypair));
-	pool_put(&noise_keypair_pool, keypair);
+	zfree(keypair, M_WG);
 }
 
 void
 noise_keypairs_init(struct noise_keypairs *keypairs)
 {
 	bzero(keypairs, sizeof(*keypairs));
-	mtx_init(&keypairs->kp_mtx, IPL_NET);
+	mtx_init(&keypairs->kp_mtx, "keypairs lock", NULL, MTX_DEF);
 }
 
 void
@@ -1432,10 +1439,10 @@ noise_kdf(uint8_t *a, uint8_t *b, uint8_t *c, const uint8_t *x,
 	uint8_t sec[BLAKE2S_HASH_SIZE];
 
 #ifdef DIAGNOSTIC
-	KASSERT(a_len <= BLAKE2S_HASH_SIZE && b_len <= BLAKE2S_HASH_SIZE &&
+	MPASS(a_len <= BLAKE2S_HASH_SIZE && b_len <= BLAKE2S_HASH_SIZE &&
 			c_len <= BLAKE2S_HASH_SIZE);
-	KASSERT(!(b || b_len || c || c_len) || (a && a_len));
-	KASSERT(!(c || c_len) || (b && b_len));
+	MPASS(!(b || b_len || c || c_len) || (a && a_len));
+	MPASS(!(c || c_len) || (b && b_len));
 #endif
 
 	/* Extract entropy from "x" into sec */
@@ -1906,7 +1913,7 @@ wg_precompute_key(uint8_t key[WG_KEY_SIZE],
 void
 wg_cookie_checker_init(struct wg_cookie_checker *checker)
 {
-	mtx_init(&checker->cc_mtx, IPL_NET);
+	mtx_init(&checker->cc_mtx, "cookie checker", NULL, MTX_DEF);
 	getnanotime(&checker->cc_secret_birthdate);
 	arc4random_buf(checker->cc_secret, WG_HASH_SIZE);
 }
@@ -1931,7 +1938,7 @@ void
 wg_cookie_init(struct wg_cookie *cookie)
 {
 	bzero(cookie, sizeof(*cookie));
-	mtx_init(&cookie->c_mtx, IPL_NET);
+	mtx_init(&cookie->c_mtx, "cookie lock", NULL, MTX_DEF);
 }
 
 void
@@ -2113,7 +2120,6 @@ out:
 	mtx_unlock(&peer->p_cookie.c_mtx);
 	explicit_bzero(cookie, sizeof(cookie));
 	noise_keypair_put(keypair);
-	return;
 }
 
 /* Peer */
@@ -2122,17 +2128,15 @@ wg_peer_create(struct wg_softc *sc, uint8_t pubkey[WG_KEY_SIZE])
 {
 	struct wg_peer *peer;
 
-	if ((peer = pool_get(&wg_peer_pool, PR_NOWAIT)) == NULL)
+	peer = malloc(sizeof(*peer), M_WG, M_ZERO|M_NOWAIT);
+	if (peer == NULL)
 		return NULL;
 
-	peer->p_id = peer_counter++;
-	/* To take reference to sc_if.if_refcnt */
-	/* TODO check refcnt leak (may not be from here?) */
-	/* TODO currently race condition exists while deleting interface,
-	 * allowing if_get to return NULL */
-	peer->p_sc = if_get(sc->sc_if.if_index)->if_softc;
+	peer->p_id = atomic_fetchadd_long(&peer_counter, 1);
+	if_ref(sc->sc_ifp);
 
-	refcnt_init(&peer->p_refcnt);
+
+	refcount_init(&peer->p_refcnt, 0);
 
 	noise_remote_init(&peer->p_remote, pubkey);
 
@@ -2144,12 +2148,12 @@ wg_peer_create(struct wg_softc *sc, uint8_t pubkey[WG_KEY_SIZE])
 	rw_init(&peer->p_endpoint_lock, "wg_peer_endpoint");
 	bzero(&peer->p_endpoint, sizeof(peer->p_endpoint));
 
-	mq_init(&peer->p_staged_packets, MAX_STAGED_PACKETS, IPL_NET);
+	mbufq_init(&peer->p_staged_packets, MAX_STAGED_PACKETS);
 	task_set(&peer->p_send_staged,
 	    (void (*)(void *))wg_peer_send_staged_packets_ref, peer);
 
-	wg_queue_serial_init(&peer->p_send_queue, IPL_NET);
-	wg_queue_serial_init(&peer->p_recv_queue, IPL_NET);
+	//	wg_queue_serial_init(&peer->p_send_queue, IPL_NET);
+	//	wg_queue_serial_init(&peer->p_recv_queue, IPL_NET);
 	task_set(&peer->p_send, (void (*)(void *))wg_peer_send, peer);
 	task_set(&peer->p_recv, (void (*)(void *))wg_peer_recv, peer);
 
@@ -2158,7 +2162,7 @@ wg_peer_create(struct wg_softc *sc, uint8_t pubkey[WG_KEY_SIZE])
 
 	peer->p_counters = counters_alloc(WG_PEER_CTR_NUM);
 
-	SLIST_INIT(&peer->p_routes);
+	CK_LIST_INIT(&peer->p_routes);
 
 	wg_hashtable_peer_insert(&sc->sc_hashtable, peer);
 
@@ -2170,15 +2174,15 @@ struct wg_peer *
 wg_peer_ref(struct wg_peer *peer)
 {
 	if (peer != NULL)
-		refcnt_take(&peer->p_refcnt);
-	return peer;
+		refcount_acquire(&peer->p_refcnt);
+	return (peer);
 }
 
 void
 wg_peer_put(struct wg_peer *peer)
 {
 	if (peer != NULL)
-		if (refcnt_rele(&peer->p_refcnt))
+		if (refcount_release(&peer->p_refcnt))
 			wg_peer_free(peer);
 }
 
@@ -2217,8 +2221,7 @@ wg_peer_free(struct wg_peer *peer)
 	if_put(&peer->p_sc->sc_if);
 
 	DPRINTF(peer->p_sc, "Peer %llu destroyed\n", peer->p_id);
-	explicit_bzero(peer, sizeof(*peer));
-	pool_put(&wg_peer_pool, peer);
+	zfree(peer, M_WG);
 }
 
 void
@@ -2493,7 +2496,6 @@ invalid:
 	 */
 	wg_peer_queue_handshake_initiation(peer, 0);
 	noise_keypair_put(keypair);
-	return;
 }
 
 void
