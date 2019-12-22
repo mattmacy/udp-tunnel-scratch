@@ -346,16 +346,17 @@ struct wg_peer {
 	struct wg_endpoint	 p_endpoint;
 
 	struct mbufq	 p_staged_packets;
-	struct task		 p_send_staged;
+	struct grouptask		 p_send_staged;
 
 	//struct wg_queue_serial	 p_send_queue;
 	//struct wg_queue_serial	 p_recv_queue;
-	struct task		 p_send;
-	struct task		 p_recv;
+	struct grouptask		 p_send;
+	struct grouptask		 p_recv;
 
-	struct task		 p_tx_initiation;
+	struct grouptask		 p_tx_initiation;
 
-	struct cpumem *		 p_counters;
+	counter_u64_t		 p_tx_bytes;
+	counter_u64_t		 p_rx_bytes;
 
 	CK_LIST_HEAD(, wg_route)	 p_routes;
 };
@@ -381,15 +382,15 @@ struct wg_softc {
 
 	struct taskq		*sc_taskq;
 	struct mbufq	 sc_handshake_queue;
-	struct task		 sc_handshake;
+	struct grouptask		 sc_handshake;
 
 	struct noise_local	 sc_local;
 	struct wg_cookie_checker sc_cookie_checker;
 
 	//struct wg_queue_parallel sc_encrypt_queue;
 	//struct wg_queue_parallel sc_decrypt_queue;
-	struct task		 sc_encrypt;
-	struct task		 sc_decrypt;
+	struct grouptask		 sc_encrypt;
+	struct grouptask		 sc_decrypt;
 };
 
 

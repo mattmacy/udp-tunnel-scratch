@@ -76,14 +76,8 @@ struct wg_peer_io {
 	size_t			 p_num_cidrs;
 	struct timespec		 p_last_handshake;
 	struct wg_cidr_io	*p_cidrs;
-
-	union {
-		uint64_t	 	p_counters[WG_PEER_CTR_NUM];
-		struct {
-			uint64_t	p_tx_bytes;
-			uint64_t	p_rx_bytes;
-		};
-	};
+	uint64_t	p_tx_bytes;
+	uint64_t	p_rx_bytes;
 	union {
 		struct sockaddr		p_sa;
 		struct sockaddr_in	p_in;
