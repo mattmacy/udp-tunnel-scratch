@@ -141,13 +141,12 @@ struct wg_pkt_data {
 	uint8_t 		buf  [];
 } __packed;
 
-#if 0
 /* Queue */
 struct wg_queue_pkt {
 	struct noise_keypair		*p_keypair;
 	struct mbuf			*p_pkt;
-	SIMPLEQ_ENTRY(wg_queue_pkt)	 p_serial;
-	SIMPLEQ_ENTRY(wg_queue_pkt)	 p_parallel;
+	STAILQ_ENTRY(wg_queue_pkt)	 p_serial;
+	STAILQ_ENTRY(wg_queue_pkt)	 p_parallel;
 	uint64_t			 p_nonce;
 	int				 p_done;
 	enum wg_pkt_state {
@@ -158,25 +157,18 @@ struct wg_queue_pkt {
 	}				 p_state;
 };
 
-struct wg_queue_parallel {
+struct wg_pktq {
 	struct mtx			q_mtx;
 	size_t				q_len;
-	SIMPLEQ_HEAD(, wg_queue_pkt)	q_items;
+	STAILQ_HEAD(, wg_queue_pkt)	q_items;
 };
 
-struct wg_queue_serial {
-	struct mtx			q_mtx;
-	SIMPLEQ_HEAD(, wg_queue_pkt)	q_items;
-};
-
-void		 	 wg_queue_parallel_init(struct wg_queue_parallel *, int);
-void		 	 wg_queue_serial_init(struct wg_queue_serial *, int);
-void		 	 wg_queue_enqueue(struct wg_queue_parallel *, struct
-		wg_queue_serial *, struct wg_queue_pkt *);
-struct wg_queue_pkt	*wg_queue_parallel_dequeue(struct wg_queue_parallel *);
-struct wg_queue_pkt	*wg_queue_serial_dequeue(struct wg_queue_serial *);
-size_t			 wg_queue_parallel_len(struct wg_queue_parallel *);
-#endif
+void		 	 wg_pktq_init(struct wg_pktq *, const char *);
+void		 	 wg_pktq_enqueue(struct wg_pktq *parallel, struct
+		wg_pktq *serial, struct wg_queue_pkt *);
+struct wg_queue_pkt	*wg_pktq_parallel_dequeue(struct wg_pktq *);
+struct wg_queue_pkt	*wg_pktq_serial_dequeue(struct wg_pktq *);
+size_t			 wg_pktq_parallel_len(struct wg_pktq *);
 
 
 /* Counter */
@@ -348,8 +340,8 @@ struct wg_peer {
 	struct mbufq	 p_staged_packets;
 	struct grouptask		 p_send_staged;
 
-	//struct wg_queue_serial	 p_send_queue;
-	//struct wg_queue_serial	 p_recv_queue;
+	struct wg_pktq	 p_send_queue;
+	struct wg_pktq	 p_recv_queue;
 	struct grouptask		 p_send;
 	struct grouptask		 p_recv;
 
@@ -387,8 +379,8 @@ struct wg_softc {
 	struct noise_local	 sc_local;
 	struct wg_cookie_checker sc_cookie_checker;
 
-	//struct wg_queue_parallel sc_encrypt_queue;
-	//struct wg_queue_parallel sc_decrypt_queue;
+	struct wg_pktq sc_encrypt_queue;
+	struct wg_pktq sc_decrypt_queue;
 	struct grouptask		 sc_encrypt;
 	struct grouptask		 sc_decrypt;
 };

@@ -14,7 +14,7 @@ KMOD=   if_wg
 CFLAGS+= -I${INCDIR}
 
 CFLAGS+= -D__KERNEL__ -D__BSD_VISIBLE=1
-CFLAGS+= -ferror-limit=25
+CFLAGS+= -ferror-limit=500
 
 .if defined(WITH_DEBUG) && ${WITH_DEBUG} == "true"
 CFLAGS+= -DINVARIANTS -DWITNESS -g -O0
