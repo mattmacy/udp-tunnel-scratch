@@ -98,4 +98,9 @@ struct wg_device_io {
 	struct wg_cidr_io	*d_cidrs;
 };
 
+
+#ifndef ENOKEY
+#define	ENOKEY	ENOTCAPABLE
+#endif
+
 #endif /* __IF_WG_H__ */

@@ -18,6 +18,7 @@
 #define _IF_WG_VARS_H_
 
 #include <sys/types.h>
+#include <sys/param.h>
 #include <sys/time.h>
 
 #include <sys/lock.h>
@@ -67,7 +68,9 @@
 #define HASHTABLE_INDEX_SIZE		(HASHTABLE_PEER_SIZE * 3)	//1 << 13
 
 
+#if __FreeBSD_version > 1300000
 typedef void timeout_t (void *);
+#endif
 
 /* Socket */
 struct wg_endpoint {
@@ -366,7 +369,10 @@ struct wg_hashtable {
 
 /* Softc */
 struct wg_softc {
+	if_softc_ctx_t shared;
+	if_ctx_t wg_ctx;
 	struct ifnet 		 *sc_ifp;
+	uint16_t		sc_incoming_port;
 
 	struct wg_socket	 sc_socket;
 	struct wg_hashtable	 sc_hashtable;
@@ -384,6 +390,26 @@ struct wg_softc {
 	struct grouptask		 sc_encrypt;
 	struct grouptask		 sc_decrypt;
 };
+
+struct wg_peer *
+	wg_route_lookup(struct wg_route_table *, struct mbuf *,
+				enum route_direction);
+
+struct wg_peer	*
+	wg_peer_ref(struct wg_peer *);
+void	wg_peer_put(struct wg_peer *);
+void	wg_peer_remove_all(struct wg_softc *);
+
+
+void	wg_hashtable_init(struct wg_hashtable *);
+void	wg_hashtable_destroy(struct wg_hashtable *);
+
+
+int	wg_route_init(struct wg_route_table *);
+
+int wg_socket_init(struct wg_softc *sc, uint16_t port);
+void wg_socket_reinit(struct wg_softc *, struct socket *so4,
+    struct socket *so6);
 
 
 #endif /* _IF_WG_VARS_H_ */

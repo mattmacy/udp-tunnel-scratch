@@ -124,20 +124,14 @@ void	wg_pktq_pkt_done(struct wg_queue_pkt *);
 
 
 /* Route */
-int	wg_route_init(struct wg_route_table *);
 void	wg_route_destroy(struct wg_route_table *);
 int	wg_route_add(struct wg_route_table *, struct wg_peer *,
 			     struct wg_cidr *);
 int	wg_route_delete(struct wg_route_table *, struct wg_peer *,
 				struct wg_cidr *);
-struct wg_peer *
-	wg_route_lookup(struct wg_route_table *, struct mbuf *,
-				enum route_direction);
+
 
 /* Hashtable */
-void	wg_hashtable_init(struct wg_hashtable *);
-void	wg_hashtable_destroy(struct wg_hashtable *);
-
 void	wg_hashtable_peer_insert(struct wg_hashtable *, struct wg_peer *);
 struct wg_peer *
 	wg_hashtable_peer_lookup(struct wg_hashtable *,
@@ -239,9 +233,6 @@ void	wg_cookie_message_consume(struct wg_pkt_cookie *, struct wg_softc *);
 /* Peer */
 struct wg_peer	*
 	wg_peer_create(struct wg_softc *, uint8_t [WG_KEY_SIZE]);
-struct wg_peer	*
-	wg_peer_ref(struct wg_peer *);
-void	wg_peer_put(struct wg_peer *);
 void	wg_peer_destroy(struct wg_peer **);
 void	wg_peer_free(struct wg_peer *);
 
@@ -372,6 +363,7 @@ invalid:
 }
 
 /* Socket */
+
 int
 wg_socket_init(struct wg_softc *sc, uint16_t port)
 {
@@ -3325,18 +3317,26 @@ wg_clone_create(struct if_clone * ifc, int unit)
 }
 #endif
 
-int
-wg_clone_destroy(struct ifnet * ifp)
-{
-	int i;
-	struct wg_peer *peer, *tpeer;
-	struct wg_softc *sc = ifp->if_softc;
 
+void
+wg_peer_remove_all(struct wg_softc *sc)
+{
+	struct wg_peer *peer, *tpeer;
+	int i;
 
 	WG_HASHTABLE_PEER_FOREACH_SAFE(peer, i, &sc->sc_hashtable, tpeer) {
 		peer = wg_peer_ref(peer);
 		wg_peer_destroy(&peer);
 	}
+
+}
+
+int
+wg_clone_destroy(struct ifnet * ifp)
+{
+	struct wg_softc *sc = ifp->if_softc;
+
+
 
 	wg_socket_softclose(&sc->sc_socket);
 

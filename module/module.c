@@ -46,13 +46,21 @@ __FBSDID("$FreeBSD$");
 #include <net/if_var.h>
 #include <net/iflib.h>
 #include <net/if_clone.h>
+#include <net/radix.h>
+#include <net/bpf.h>
+#include <net/mp_ring.h>
 
 #include "ifdi_if.h"
 
+#if 0
 #include <sys/noise.h>
 #include <sys/ratelimiter.h>
+#endif
 #include <sys/wg_module.h>
 #include <crypto/zinc.h>
+#include <sys/if_wg_session_vars.h>
+#include <sys/if_wg_session.h>
+
 
 MALLOC_DEFINE(M_WG, "WG", "wireguard");
 
@@ -74,7 +82,7 @@ wg_cloneattach(if_ctx_t ctx, struct if_clone *ifc, const char *name, caddr_t par
 	scctx->isc_tx_csum_flags = CSUM_TCP | CSUM_UDP | CSUM_TSO | CSUM_IP6_TCP \
 		| CSUM_IP6_UDP | CSUM_IP6_TCP;
 	wg->wg_ctx = ctx;
-	wg->wg_ifp = iflib_get_ifp(ctx);
+	wg->sc_ifp = iflib_get_ifp(ctx);
 	return (0);
 }
 
@@ -83,25 +91,27 @@ wg_transmit(struct ifnet *ifp, struct mbuf *m)
 {
 	struct wg_softc *sc;
 	sa_family_t family;
+	struct wg_peer *peer;
 	int rc;
 
 	rc = 0;
 	sc = iflib_get_softc(ifp->if_softc);
 	ETHER_BPF_MTAP(ifp, m);
-	peer = wg_whitelist_lookup_dst(sc->wg_whitelist, m);
+	peer = wg_route_lookup(&sc->sc_routes, m, OUT);
 	if (__predict_false(peer == NULL)) {
 		rc = ENOKEY;
 		/* XXX log */
 		goto err;
 	}
-	family = atomic_load_acq(peer->wp_endpoint.addr.sa_family);
+
+	family = atomic_load_acq(peer->p_endpoint.e_remote.r_sa.sa_family);
 	if (__predict_false(family != AF_INET && family != AF_INET6)) {
 		rc = EHOSTUNREACH;
 		/* XXX log */
 		goto err_peer;
 	}
-	if (ifmp_ring_enqueue(peer->wp_staged_pktq, &m, 1, MAX_TX_BATCH) == ENOBUFS) {
-		m_free(m);
+	if (mbufq_enqueue(&peer->p_staged_packets, m) != 0) {
+		if_inc_counter(sc->sc_ifp, IFCOUNTER_OQDROPS, 1);
 		rc = ENOBUFS;
 	}
 	wg_peer_put(peer);
@@ -109,6 +119,7 @@ wg_transmit(struct ifnet *ifp, struct mbuf *m)
 err_peer:
 	wg_peer_put(peer);
 err:
+	if_inc_counter(sc->sc_ifp, IFCOUNTER_OERRORS, 1);
 	/* XXX send ICMP unreachable */
 	m_free(m);
 	return (rc);
@@ -124,13 +135,16 @@ wg_attach_post(if_ctx_t ctx)
 	sc = iflib_get_softc(ctx);
 	ifp = iflib_get_ifp(ctx);
 	//if_setmtu(ifp, ETHERMTU - 50);
+	/* XXX do sokect_init */
 	ifp->if_transmit = wg_transmit; 
-	CK_LIST_INIT(&sc->wg_peer_list);
-	mtx_init(&sc->wg_socket_lock);
-		
+	//CK_LIST_INIT(&sc->wg_peer_list);
+	//mtx_init(&sc->wg_socket_lock, "sock lock", NULL, MTX_DEF);
+
+	wg_hashtable_init(&sc->sc_hashtable);
+	wg_route_init(&sc->sc_routes);
+
 	return (0);
 }
-
 
 static int
 wg_detach(if_ctx_t ctx)
@@ -138,7 +152,7 @@ wg_detach(if_ctx_t ctx)
 	struct wg_softc *sc;
 
 	sc = iflib_get_softc(ctx);
-	sc->wg_accept_port = 0;
+	//sc->wg_accept_port = 0;
 	wg_socket_reinit(sc, NULL, NULL);
 	wg_peer_remove_all(sc);
 	
@@ -151,18 +165,16 @@ static void
 wg_init(if_ctx_t ctx)
 {
 	struct wg_softc *sc;
-	int rc;
+	//int rc;
 
 	sc = iflib_get_softc(ctx);
-	if ((rc = wg_socket_init(sc, sc->wg_rx_port))) {
-		/* XXX log rc error */
-		return;
-	}
+	/*
 	CK_STAILQ_FOREACH(&sc->wg_peer_list, ...) {
 		wg_pkt_staged_tx(peer);
 		if (peer->wp_keepalive_intvl)
 			wg_pkt_keepalive_tx(peer);
-	}
+			}
+	*/
 }
 
 static void
