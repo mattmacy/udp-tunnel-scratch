@@ -412,4 +412,8 @@ void wg_socket_reinit(struct wg_softc *, struct socket *so4,
     struct socket *so6);
 
 
+void wg_noise_param_init(void);
+
+
+
 #endif /* _IF_WG_VARS_H_ */

@@ -27,7 +27,7 @@ void blake2s_init(struct blake2s_state *state, const size_t outlen);
 void blake2s_init_key(struct blake2s_state *state, const size_t outlen,
 		      const void *key, const size_t keylen);
 void blake2s_update(struct blake2s_state *state, const uint8_t *in, size_t inlen);
-void blake2s_final(struct blake2s_state *state, uint8_t *out);
+//void blake2s_final(struct blake2s_state *state, uint8_t *out);
 
 static inline void blake2s(uint8_t *out, const uint8_t *in, const uint8_t *key,
 			   const size_t outlen, const size_t inlen,

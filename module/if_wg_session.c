@@ -299,6 +299,25 @@ callout_del(struct callout *c)
 	return (callout_stop(c) > 0);
 }
 
+static const uint8_t handshake_name[37] = "Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s";
+static const uint8_t identifier_name[30] = "WireGuard v1 FreeBSD.org";
+static __read_mostly uint8_t handshake_init_hash[NOISE_HASH_LEN];
+static __read_mostly uint8_t handshake_init_chaining_key[NOISE_HASH_LEN];
+//static atomic64_t keypair_counter = ATOMIC64_INIT(0);
+
+void
+wg_noise_param_init(void)
+{
+	struct blake2s_state blake;
+
+	blake2s(handshake_init_chaining_key, handshake_name, NULL,
+		NOISE_HASH_LEN, sizeof(handshake_name), 0);
+	blake2s_init(&blake, NOISE_HASH_LEN);
+	blake2s_update(&blake, handshake_init_chaining_key, NOISE_HASH_LEN);
+	blake2s_update(&blake, identifier_name, sizeof(identifier_name));
+	blake2s_final(&blake, handshake_init_hash, NOISE_HASH_LEN);
+}
+
 /* Counter */
 void
 wg_counter_init(struct wg_counter *ctr)
