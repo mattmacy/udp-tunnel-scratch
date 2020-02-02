@@ -182,15 +182,18 @@ wg_stop(if_ctx_t ctx)
 {
 	struct wg_softc *sc;
 
+	sc  = iflib_get_softc(ctx);
+	/*
 	CK_LIST_FOREACH(&sc->wg_peer_list, ...) {
 		wg_staged_pktq_purge(peer);
 		wg_timers_stop(peer);
 		wg_noise_handshake_clear(&peer->handshake);
 		wg_noise_keypairs_clear(&peer->keypairs);
 		wg_noise_reset_last_sent_handshake(&peer->last_sent_handshake);
-	}
-	mbufq_drain(&sc->wg_rx_handshakes);
-	wg_socket_reinit(sc, NULL, NULL);
+		}
+	*/
+	//mbufq_drain(&sc->wg_rx_handshakes);
+	//wg_socket_reinit(sc, NULL, NULL);
 }
 
 
@@ -285,3 +288,4 @@ static moduledata_t wg_moduledata = {
 DECLARE_MODULE(wg, wg_moduledata, SI_SUB_PSEUDO, SI_ORDER_ANY);
 MODULE_VERSION(wg, 1);
 MODULE_DEPEND(wg, iflib, 1, 1, 1);
+MODULE_DEPEND(wg, blake2, 1, 1, 1);
