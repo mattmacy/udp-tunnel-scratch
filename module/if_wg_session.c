@@ -59,6 +59,9 @@
 #include <crypto/curve25519.h>
 //#include <crypto/chachapoly.h>
 
+#define	GROUPTASK_DRAIN(gtask)			\
+	grouptaskqueue_drain((gtask)->gt_taskqueue, &(gtask)->gt_task)
+
 #if 0
 #define DPRINTF(sc, str, ...) do { if (ISSET((sc)->sc_if.if_flags, IFF_DEBUG)) \
     printf("%s: " str, (sc)->sc_if.if_xname, ##__VA_ARGS__); } while (0)
@@ -234,7 +237,7 @@ void	wg_cookie_message_consume(struct wg_pkt_cookie *, struct wg_softc *);
 struct wg_peer	*
 	wg_peer_create(struct wg_softc *, uint8_t [WG_KEY_SIZE]);
 void	wg_peer_destroy(struct wg_peer **);
-void	wg_peer_free(struct wg_peer *);
+void	wg_peer_free(epoch_context_t ctx);
 
 void	wg_peer_queue_handshake_initiation(struct wg_peer *, int);
 void	wg_peer_send_handshake_initiation(struct wg_peer *);
@@ -990,6 +993,7 @@ wg_route_lookup(struct wg_route_table *tbl, struct mbuf *m,
 	void *addr;
 	int version;
 
+	NET_EPOCH_ASSERT();
 	iphdr = mtod(m, struct ip *);
 	version = iphdr->ip_v;
 
@@ -1013,8 +1017,10 @@ wg_route_lookup(struct wg_route_table *tbl, struct mbuf *m,
 		return (NULL);
 
 	RADIX_NODE_HEAD_RLOCK(root);
-	if ((node = root->rnh_matchaddr(addr, &root->rh)) != NULL)
-		peer = wg_peer_ref(((struct wg_route *) node)->r_peer);
+	if ((node = root->rnh_matchaddr(addr, &root->rh)) != NULL) {
+		peer = ((struct wg_route *) node)->r_peer;
+		peer = peer->p_refcnt ? peer : NULL;
+	}
 	RADIX_NODE_HEAD_RUNLOCK(root);
 	return (peer);
 }
@@ -2176,9 +2182,9 @@ wg_peer_ref(struct wg_peer *peer)
 void
 wg_peer_put(struct wg_peer *peer)
 {
-	if (peer != NULL)
-		if (refcount_release(&peer->p_refcnt))
-			wg_peer_free(peer);
+
+	if (peer != NULL && refcount_release(&peer->p_refcnt))
+		NET_EPOCH_CALL(wg_peer_free, &peer->p_ctx);
 }
 
 void
@@ -2204,13 +2210,19 @@ wg_peer_destroy(struct wg_peer **peer_p)
 	/* TODO currently, if there is a timer added after here, then the peer
 	 * can hang around for longer than we want. */
 	wg_peer_timers_stop(peer);
+	GROUPTASK_DRAIN(&peer->p_send)
+	GROUPTASK_DRAIN(&peer->p_recv)
+	GROUPTASK_DRAIN(&peer->p_tx_initiation)
 
 	wg_peer_put(peer);
 }
 
 void
-wg_peer_free(struct wg_peer *peer)
+wg_peer_free(epoch_context_t ctx)
 {
+	struct wg_peer *peer;
+
+	peer = __containerof(ctx, struct wg_peer, p_ctx);
 	counter_u64_free(peer->p_tx_bytes);
 	counter_u64_free(peer->p_rx_bytes);
 

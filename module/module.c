@@ -91,12 +91,15 @@ wg_transmit(struct ifnet *ifp, struct mbuf *m)
 {
 	struct wg_softc *sc;
 	sa_family_t family;
+	struct epoch_tracker et;
 	struct wg_peer *peer;
 	int rc;
 
 	rc = 0;
 	sc = iflib_get_softc(ifp->if_softc);
 	ETHER_BPF_MTAP(ifp, m);
+
+	NET_EPOCH_ENTER(et);
 	peer = wg_route_lookup(&sc->sc_routes, m, OUT);
 	if (__predict_false(peer == NULL)) {
 		rc = ENOKEY;
@@ -108,17 +111,17 @@ wg_transmit(struct ifnet *ifp, struct mbuf *m)
 	if (__predict_false(family != AF_INET && family != AF_INET6)) {
 		rc = EHOSTUNREACH;
 		/* XXX log */
-		goto err_peer;
+		goto err;
 	}
 	if (mbufq_enqueue(&peer->p_staged_packets, m) != 0) {
 		if_inc_counter(sc->sc_ifp, IFCOUNTER_OQDROPS, 1);
 		rc = ENOBUFS;
+		m_freem(m);
 	}
-	wg_peer_put(peer);
+	NET_EPOCH_EXIT(et);
 	return (rc); 
-err_peer:
-	wg_peer_put(peer);
 err:
+	NET_EPOCH_EXIT(et);
 	if_inc_counter(sc->sc_ifp, IFCOUNTER_OERRORS, 1);
 	/* XXX send ICMP unreachable */
 	m_free(m);
