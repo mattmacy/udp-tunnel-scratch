@@ -354,6 +354,7 @@ struct wg_peer {
 	counter_u64_t		 p_rx_bytes;
 
 	CK_LIST_HEAD(, wg_route)	 p_routes;
+	struct mtx p_lock;
 	struct epoch_context p_ctx;
 };
 

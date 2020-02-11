@@ -1298,15 +1298,15 @@ noise_keypairs_lookup(struct noise_keypairs *keypairs,
 		      enum noise_keypair_type type)
 {
 	struct noise_keypair *keypair = NULL;
-	mtx_lock(&keypairs->kp_mtx);
+	NET_EPOCH_ASSERT();
+
 	if (type == NOISE_KEYPAIR_CURRENT)
 		keypair = noise_keypair_ref(keypairs->kp_current_keypair);
 	else if (type == NOISE_KEYPAIR_PREVIOUS)
 		keypair = noise_keypair_ref(keypairs->kp_previous_keypair);
 	else if (type == NOISE_KEYPAIR_NEXT)
 		keypair = noise_keypair_ref(keypairs->kp_next_keypair);
-	mtx_unlock(&keypairs->kp_mtx);
-	return keypair;
+	return (keypair);
 }
 
 int
@@ -2447,11 +2447,24 @@ wg_peer_send_staged_packets(struct wg_peer *peer)
 	struct wg_softc *sc = peer->p_sc;
 	struct noise_keypair *keypair;
 	struct wg_queue_pkt *pkt;
+	struct mbuf_queue mq;
 	struct mbuf *m;
 
+	NET_EPOCH_ASSERT();
+	mbufq_init(&mq , MAX_QUEUED_PACKETS);
+
+	/*
+	 * The duplicated locking and unlocking with the wg_transmit caller
+	 * is kind of moronic  but it's what Linux and OpenBSD both do here,
+	 * so it is maintained in the interim
+	 */
+	mtx_lock(&peer->p_lock);
+	mbufq_concat(&mq, &peer->p_staged_packets);
+	mtx_unlock(&peer->p_lock);
 	/* First we make sure we have a valid reference to a valid key. */
+	/* XXX determine lifecycle management - epoch? */
 	keypair = noise_keypairs_lookup(&peer->p_keypairs,
-					NOISE_KEYPAIR_CURRENT);
+	    NOISE_KEYPAIR_CURRENT);
 
 	if (keypair == NULL || wg_timers_expired(&keypair->k_birthdate,
 						 REJECT_AFTER_TIME, 0))
@@ -2464,7 +2477,7 @@ wg_peer_send_staged_packets(struct wg_peer *peer)
 	 * handshake.
 	 */
 	while (wg_pktq_parallel_len(&sc->sc_encrypt_queue) < MAX_QUEUED_PACKETS
-			&& (m = mbufq_dequeue(&peer->p_staged_packets)) != NULL) {
+			&& (m = mbufq_dequeue(&mq)) != NULL) {
 
 		pkt = wg_mbuf_pkt_get(m);
 		pkt->p_state = WG_PKT_STATE_CLEAR;

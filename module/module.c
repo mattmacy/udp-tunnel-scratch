@@ -113,11 +113,14 @@ wg_transmit(struct ifnet *ifp, struct mbuf *m)
 		/* XXX log */
 		goto err;
 	}
+	mtx_lock(&peer->p_lock);
 	if (mbufq_enqueue(&peer->p_staged_packets, m) != 0) {
 		if_inc_counter(sc->sc_ifp, IFCOUNTER_OQDROPS, 1);
 		rc = ENOBUFS;
 		m_freem(m);
 	}
+	mtx_unlock(&peer->p_lock);
+	wg_peer_send_staged_packets(peer);
 	NET_EPOCH_EXIT(et);
 	return (rc); 
 err:
