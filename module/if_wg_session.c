@@ -60,7 +60,18 @@
 //#include <crypto/chachapoly.h>
 
 #define	GROUPTASK_DRAIN(gtask)			\
-	grouptaskqueue_drain((gtask)->gt_taskqueue, &(gtask)->gt_task)
+	gtaskqueue_drain((gtask)->gt_taskqueue, &(gtask)->gt_task)
+
+/*
+ * m_dat / m_pktdat is inuse for wireguard internal state
+ */
+#define	M_DAT_INUSE	M_PROTO1
+
+#define	M_DAT_TYPE_UNUSED	0x0
+#define	M_DAT_TYPE_QPKT	0x1
+#define	M_DAT_TYPE_ENDPOINT	0x2
+
+
 
 #if 0
 #define DPRINTF(sc, str, ...) do { if (ISSET((sc)->sc_if.if_flags, IFF_DEBUG)) \
@@ -254,14 +265,13 @@ void	wg_peer_recv(struct wg_peer *);
 void	wg_peer_enqueue_buffer(struct wg_peer *, void *, size_t);
 
 void	wg_peer_send_keepalive(struct wg_peer *);
-void	wg_peer_send_staged_packets(struct wg_peer *);
 void	wg_peer_send_staged_packets_ref(struct wg_peer *);
 void	wg_peer_flush_staged_packets(struct wg_peer *);
 
 /* Packet */
 struct wg_endpoint *
 	wg_mbuf_endpoint_get(struct mbuf *);
-struct wg_queue_pkt *
+static struct wg_queue_pkt *
 	wg_mbuf_pkt_get(struct mbuf *);
 int	wg_mbuf_add_ipudp(struct mbuf **, struct wg_socket *,
 			  struct wg_endpoint *);
@@ -290,10 +300,16 @@ int	wg_ioctl(struct ifnet *, u_long, caddr_t);
 int	wg_clone_destroy(struct ifnet *);
 void	wgattach(int);
 
+
+struct m_dat_hdr {
+	uint8_t	mdh_types[2];
+};
+
 /* Globals */
 
 static volatile uint64_t keypair_counter = 0;
 static volatile unsigned long peer_counter = 0;
+
 
 
 static inline int
@@ -2210,9 +2226,9 @@ wg_peer_destroy(struct wg_peer **peer_p)
 	/* TODO currently, if there is a timer added after here, then the peer
 	 * can hang around for longer than we want. */
 	wg_peer_timers_stop(peer);
-	GROUPTASK_DRAIN(&peer->p_send)
-	GROUPTASK_DRAIN(&peer->p_recv)
-	GROUPTASK_DRAIN(&peer->p_tx_initiation)
+	GROUPTASK_DRAIN(&peer->p_send);
+	GROUPTASK_DRAIN(&peer->p_recv);
+	GROUPTASK_DRAIN(&peer->p_tx_initiation);
 
 	wg_peer_put(peer);
 }
@@ -2447,7 +2463,7 @@ wg_peer_send_staged_packets(struct wg_peer *peer)
 	struct wg_softc *sc = peer->p_sc;
 	struct noise_keypair *keypair;
 	struct wg_queue_pkt *pkt;
-	struct mbuf_queue mq;
+	struct mbufq mq;
 	struct mbuf *m;
 
 	NET_EPOCH_ASSERT();
@@ -2536,24 +2552,60 @@ wg_mbuf_endpoint_get(struct mbuf *m)
 	}
 	return ((struct wg_endpoint *)(mtag + 1));
 }
+#endif
 
-struct wg_queue_pkt *
+static struct mbuf *
+wg_mbuf_pkthdr_move(struct mbuf *m)
+{
+	struct mbuf *mh;
+
+	mh = m_gethdr(M_NOWAIT, MT_DATA);
+	if (mh == NULL)
+			return (NULL);
+	memcpy(&mh->m_pkthdr, &m->m_pkthdr, sizeof(struct pkthdr));
+	m_demote_pkthdr(m);
+	mh->m_next = m;
+	return (mh);
+}
+
+static struct wg_queue_pkt *
 wg_mbuf_pkt_get(struct mbuf *m)
 {
-	struct m_tag	*mtag;
+	struct m_dat_hdr *hdr;
+	struct wg_endpoint *wend;
 
-	if ((mtag = m_tag_find(m, PACKET_TAG_TUNNEL, NULL)) == NULL) {
-		mtag = m_tag_get(PACKET_TAG_TUNNEL,
-		    sizeof(struct wg_queue_pkt), M_NOWAIT);
-		if (mtag == NULL)
+	MPASS(m->m_flags & M_PKTHDR);
+	if ((m->m_flags  & M_EXT) == 0) {
+		/*
+		 * We can't readily use m_pktdat
+		 */
+		if ((m = wg_mbuf_pkthdr_move(m)) == NULL)
 			return (NULL);
-		bzero(mtag + 1, sizeof(struct wg_queue_pkt));
-		m_tag_prepend(m, mtag);
-		((struct wg_queue_pkt *)(mtag + 1))->p_pkt = m;
 	}
-	return ((struct wg_queue_pkt *)(mtag + 1));
+
+	/*
+	 * m->m_pktdat is not in use
+	 */
+	hdr = (struct m_dat_hdr *)m->m_pktdat;
+	if ((m->m_flags & M_DAT_INUSE) == 0) {
+		m->m_flags |= M_DAT_INUSE;
+		hdr->mdh_types[0] = M_DAT_TYPE_QPKT;
+		hdr->mdh_types[1] = M_DAT_TYPE_UNUSED;
+	}
+	switch (hdr->mdh_types[0]) {
+		case M_DAT_TYPE_QPKT:
+			return (struct wg_queue_pkt *)(hdr +1);
+		case M_DAT_TYPE_ENDPOINT:
+			wend = (struct wg_endpoint *)(hdr +1);
+			if (hdr->mdh_types[1] == M_DAT_TYPE_UNUSED)
+				hdr->mdh_types[1] = M_DAT_TYPE_QPKT;
+			return (struct wg_queue_pkt *)(wend +1);
+		default:
+			panic("invalid M_DAT type");
+	}
+	return (NULL);
 }
-#endif
+
 
 int
 wg_mbuf_add_ipudp(struct mbuf **m0, struct wg_socket *so, struct wg_endpoint *e)

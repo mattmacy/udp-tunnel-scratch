@@ -402,6 +402,7 @@ struct wg_peer	*
 void	wg_peer_put(struct wg_peer *);
 void	wg_peer_remove_all(struct wg_softc *);
 
+void	wg_peer_send_staged_packets(struct wg_peer *);
 
 void	wg_hashtable_init(struct wg_hashtable *);
 void	wg_hashtable_destroy(struct wg_hashtable *);
