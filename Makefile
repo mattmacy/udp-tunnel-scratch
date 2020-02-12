@@ -4,12 +4,14 @@ WITH_CTF=1
 
 .include <bsd.sys.mk>
 
-SRCDIR= ${.CURDIR}
-INCDIR=${.CURDIR:H}/include
+SRCDIR= ${.CURDIR}/module
+INCDIR=${.CURDIR}/include
+ZINCDIR= ${SRCDIR}/crypto/zinc
 
 KMOD=   if_wg
 
 .PATH: ${SRCDIR}
+.PATH: ${ZINCDIR}
 
 CFLAGS+= -I${INCDIR}
 
@@ -28,5 +30,5 @@ SRCS+= opt_inet.h opt_inet6.h device_if.h bus_if.h ifdi_if.h
 
 #SRCS+= module.c cookie.c noise.c peer.c whitelist.c
 SRCS+= if_wg_session.c module.c curve25519.c blake2s.c
-
+SRCS+= chacha20poly1305.c
 .include <bsd.kmod.mk>

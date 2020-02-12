@@ -295,3 +295,4 @@ DECLARE_MODULE(wg, wg_moduledata, SI_SUB_PSEUDO, SI_ORDER_ANY);
 MODULE_VERSION(wg, 1);
 MODULE_DEPEND(wg, iflib, 1, 1, 1);
 MODULE_DEPEND(wg, blake2, 1, 1, 1);
+MODULE_DEPEND(wg, crypto, 1, 1, 1);

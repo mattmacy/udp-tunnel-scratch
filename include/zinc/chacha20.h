@@ -6,10 +6,11 @@
 #ifndef _ZINC_CHACHA20_H
 #define _ZINC_CHACHA20_H
 
-#include <asm/unaligned.h>
-#include <linux/simd.h>
-#include <linux/kernel.h>
-#include <linux/types.h>
+#include <sys/param.h>
+
+typedef	uint8_t u8;
+typedef	uint32_t u32;
+typedef	uint64_t u64;
 
 enum chacha20_lengths {
 	CHACHA20_NONCE_SIZE = 16,
