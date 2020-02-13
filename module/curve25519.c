@@ -15,15 +15,6 @@
 #include <sys/types.h>
 #include <sys/systm.h>
 #include <crypto/curve25519.h>
-#define memzero_explicit explicit_bzero
-typedef uint32_t u32;
-typedef uint64_t u64;
-
-static inline u32 get_unaligned_le32(const u8 *p)
-{
-	return p[0] | p[1] << 8 | p[2] << 16 | p[3] << 24;
-}
-/* End compat */
 
 /* fe means field element. Here the field is \Z/(2^255-19). An element t,
  * entries t[0]...t[9], represents the integer t[0]+2^26 t[1]+2^51 t[2]+2^77
