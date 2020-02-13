@@ -269,7 +269,7 @@ void	wg_peer_send_staged_packets_ref(struct wg_peer *);
 void	wg_peer_flush_staged_packets(struct wg_peer *);
 
 /* Packet */
-struct wg_endpoint *
+static struct wg_endpoint *
 	wg_mbuf_endpoint_get(struct mbuf *);
 static struct wg_queue_pkt *
 	wg_mbuf_pkt_get(struct mbuf *);
@@ -2535,24 +2535,7 @@ wg_peer_flush_staged_packets(struct wg_peer *peer)
 	mbufq_drain(&peer->p_staged_packets);
 }
 
-#if 0
 /* Packet */
-struct wg_endpoint *
-wg_mbuf_endpoint_get(struct mbuf *m)
-{
-	struct m_tag	*mtag;
-
-	if ((mtag = m_tag_find(m, PACKET_TAG_SRCROUTE, NULL)) == NULL) {
-		mtag = m_tag_get(PACKET_TAG_SRCROUTE,
-		    sizeof(struct wg_endpoint), M_NOWAIT);
-		if (mtag == NULL)
-			return (NULL);
-		bzero(mtag + 1, sizeof(struct wg_endpoint));
-		m_tag_prepend(m, mtag);
-	}
-	return ((struct wg_endpoint *)(mtag + 1));
-}
-#endif
 
 static struct mbuf *
 wg_mbuf_pkthdr_move(struct mbuf *m)
@@ -2566,6 +2549,44 @@ wg_mbuf_pkthdr_move(struct mbuf *m)
 	m_demote_pkthdr(m);
 	mh->m_next = m;
 	return (mh);
+}
+
+static struct wg_endpoint *
+wg_mbuf_endpoint_get(struct mbuf *m)
+{
+	struct m_dat_hdr *hdr;
+	struct wg_queue_pkt *wqpkt;
+
+	MPASS(m->m_flags & M_PKTHDR);
+	if ((m->m_flags  & M_EXT) == 0) {
+		/*
+		 * We can't readily use m_pktdat
+		 */
+		if ((m = wg_mbuf_pkthdr_move(m)) == NULL)
+			return (NULL);
+	}
+
+	/*
+	 * m->m_pktdat is not in use
+	 */
+	hdr = (struct m_dat_hdr *)m->m_pktdat;
+	if ((m->m_flags & M_DAT_INUSE) == 0) {
+		m->m_flags |= M_DAT_INUSE;
+		hdr->mdh_types[0] = M_DAT_TYPE_ENDPOINT;
+		hdr->mdh_types[1] = M_DAT_TYPE_UNUSED;
+	}
+	switch (hdr->mdh_types[0]) {
+		case M_DAT_TYPE_ENDPOINT:
+			return (struct wg_endpoint *)(hdr +1);
+		case M_DAT_TYPE_QPKT:
+			wqpkt = (struct wg_queue_pkt *)(hdr +1);
+			if (hdr->mdh_types[1] == M_DAT_TYPE_UNUSED)
+				hdr->mdh_types[1] = M_DAT_TYPE_ENDPOINT;
+			return (struct wg_endpoint *)(wqpkt +1);
+		default:
+			panic("invalid M_DAT type");
+	}
+	return (NULL);
 }
 
 static struct wg_queue_pkt *
