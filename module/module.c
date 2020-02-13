@@ -327,6 +327,32 @@ crypto_aead_chacha20poly1305_decrypt_detached(unsigned char *m,
                                               const unsigned char *npub,
                                               const unsigned char *k);
 
+
+int
+crypto_aead_xchacha20poly1305_ietf_encrypt_detached(unsigned char *c,
+                                                    unsigned char *mac,
+                                                    unsigned long long *maclen_p,
+                                                    const unsigned char *m,
+                                                    unsigned long long mlen,
+                                                    const unsigned char *ad,
+                                                    unsigned long long adlen,
+                                                    const unsigned char *nsec,
+                                                    const unsigned char *npub,
+                                                    const unsigned char *k);
+
+
+int
+crypto_aead_xchacha20poly1305_ietf_decrypt_detached(unsigned char *m,
+                                                    unsigned char *nsec,
+                                                    const unsigned char *c,
+                                                    unsigned long long clen,
+                                                    const unsigned char *mac,
+                                                    const unsigned char *ad,
+                                                    unsigned long long adlen,
+                                                    const unsigned char *npub,
+                                                    const unsigned char *k);
+
+
 void chacha20poly1305_encrypt(u8 *dst, const u8 *src, const size_t src_len,
 			      const u8 *ad, const size_t ad_len,
 			      const u64 nonce,
@@ -345,4 +371,20 @@ bool chacha20poly1305_decrypt(u8 *dst, const u8 *src, const size_t src_len,
 
 	err = crypto_aead_chacha20poly1305_decrypt_detached(dst, NULL, src, src_len, src + src_len, ad, ad_len, (const char *)&nonce, key);
 	return (err == 0);
+}
+
+void xchacha20poly1305_encrypt(u8 *dst, const u8 *src, const size_t src_len,
+			       const u8 *ad, const size_t ad_len,
+			       const u8 nonce[XCHACHA20POLY1305_NONCE_SIZE],
+			       const u8 key[CHACHA20POLY1305_KEY_SIZE])
+{
+}
+
+
+bool xchacha20poly1305_decrypt(u8 *dst, const u8 *src, const size_t src_len,
+			       const u8 *ad, const size_t ad_len,
+			       const u8 nonce[XCHACHA20POLY1305_NONCE_SIZE],
+			       const u8 key[CHACHA20POLY1305_KEY_SIZE])
+{
+	return (0);
 }
