@@ -29,6 +29,8 @@
 /* This is only needed for wg_keypair. */
 #include <sys/if_wg_session.h>
 
+#define UNIMPLEMENTED() panic("%s not implemented\n", __func__)
+
 #define WG_KEY_SIZE		 	32
 #define WG_HASH_SIZE			32
 #define WG_XNONCE_SIZE			24

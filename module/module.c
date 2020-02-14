@@ -229,15 +229,24 @@ static struct if_shared_ctx wg_sctx_init = {
 if_shared_ctx_t wg_sctx = &wg_sctx_init;
 static if_pseudo_t wg_pseudo;
 
+
+int
+wg_ctx_init(void)
+{
+	UNIMPLEMENTED();
+	return (0);
+}
+
+void
+wg_ctx_uninit(void)
+{
+	UNIMPLEMENTED();
+}
+
 static int
 wg_module_init(void)
 {
 	int rc;
-
-	if ((rc = chacha20_mod_init()) || (rc = poly1305_mod_init()) ||
-	    (rc = chacha20poly1305_mod_init()) || (rc = blake2s_mod_init()) ||
-	    (rc = curve25519_mod_init()))
-		return (rc);
 
 #ifdef DEBUG
 	if (!wg_allowedips_selftest() || !wg_packet_counter_selftest() ||

@@ -62,6 +62,7 @@
 #define	GROUPTASK_DRAIN(gtask)			\
 	gtaskqueue_drain((gtask)->gt_taskqueue, &(gtask)->gt_task)
 
+
 /*
  * m_dat / m_pktdat is inuse for wireguard internal state
  */
@@ -424,6 +425,14 @@ wg_socket_init(struct wg_softc *sc, uint16_t port)
 
 	rc = wg_socket_bind(so);
 	return (rc);
+}
+
+
+void
+wg_socket_reinit(struct wg_softc *wg, struct socket *new4,
+    struct socket *new6)
+{
+	UNIMPLEMENTED();
 }
 
 void
@@ -2365,10 +2374,11 @@ wg_peer_mbuf_add_ipudp(struct wg_peer *peer, struct mbuf **m)
 	return err;
 }
 
-#if 0
 void
 wg_peer_send(struct wg_peer *peer)
 {
+	UNIMPLEMENTED();
+#if 0
 	struct mbuf *m;
 	struct wg_queue_pkt *pkt;
 
@@ -2382,8 +2392,8 @@ wg_peer_send(struct wg_peer *peer)
 		}
 	}
 	wg_peer_put(peer);
-}
 #endif
+}
 
 void
 wg_peer_recv(struct wg_peer *peer)
