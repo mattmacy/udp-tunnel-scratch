@@ -378,6 +378,7 @@ void xchacha20poly1305_encrypt(u8 *dst, const u8 *src, const size_t src_len,
 			       const u8 nonce[XCHACHA20POLY1305_NONCE_SIZE],
 			       const u8 key[CHACHA20POLY1305_KEY_SIZE])
 {
+	crypto_aead_xchacha20poly1305_ietf_encrypt_detached(dst, dst + src_len, NULL, src, src_len, ad, ad_len, NULL, (const char *)&nonce, key);
 }
 
 
@@ -386,5 +387,8 @@ bool xchacha20poly1305_decrypt(u8 *dst, const u8 *src, const size_t src_len,
 			       const u8 nonce[XCHACHA20POLY1305_NONCE_SIZE],
 			       const u8 key[CHACHA20POLY1305_KEY_SIZE])
 {
-	return (0);
+	int err;
+
+	err = crypto_aead_xchacha20poly1305_ietf_decrypt_detached(dst, NULL, src, src_len, src + src_len, ad, ad_len, (const char *)&nonce, key);
+	return (err == 0);
 }
