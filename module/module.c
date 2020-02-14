@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 Netgate, Inc.
+ * Copyright (c) 2019-2020 Netgate, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -248,11 +248,6 @@ wg_module_init(void)
 {
 	int rc;
 
-#ifdef DEBUG
-	if (!wg_allowedips_selftest() || !wg_packet_counter_selftest() ||
-	    !wg_ratelimiter_selftest())
-		return EDOOFUS;
-#endif
 	wg_noise_param_init();
 
 	if ((rc = wg_ctx_init()))
