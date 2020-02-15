@@ -237,14 +237,14 @@ static if_pseudo_t wg_pseudo;
 int
 wg_ctx_init(void)
 {
-	UNIMPLEMENTED();
+
 	return (0);
 }
 
 void
 wg_ctx_uninit(void)
 {
-	UNIMPLEMENTED();
+
 }
 
 static int
