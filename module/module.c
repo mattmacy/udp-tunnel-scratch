@@ -171,9 +171,13 @@ static void
 wg_init(if_ctx_t ctx)
 {
 	struct wg_softc *sc;
-	//int rc;
+	//struct wg_peer *peer;
+	int rc;
 
 	sc = iflib_get_softc(ctx);
+	rc = wg_socket_init(sc);
+	if (rc)
+		return;
 	/*
 	CK_STAILQ_FOREACH(&sc->wg_peer_list, ...) {
 		wg_pkt_staged_tx(peer);

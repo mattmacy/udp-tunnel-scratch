@@ -412,7 +412,7 @@ void	wg_hashtable_destroy(struct wg_hashtable *);
 
 int	wg_route_init(struct wg_route_table *);
 
-int wg_socket_init(struct wg_softc *sc, uint16_t port);
+int wg_socket_init(struct wg_softc *sc);
 void wg_socket_reinit(struct wg_softc *, struct socket *so4,
     struct socket *so6);
 

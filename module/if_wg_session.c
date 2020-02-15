@@ -96,7 +96,6 @@ uint64_t	wg_counter_next(struct wg_counter *);
 int		wg_counter_validate(struct wg_counter *, uint64_t);
 
 /* Socket */
-//int	wg_socket_init(struct wg_socket *, struct wg_softc *);
 void	wg_socket_softclose(struct wg_socket *);
 int	wg_socket_close(struct wg_socket *);
 int	wg_socket_bind(struct wg_socket *);
@@ -405,22 +404,29 @@ invalid:
 /* Socket */
 
 int
-wg_socket_init(struct wg_softc *sc, uint16_t port)
+wg_socket_init(struct wg_softc *sc)
 {
 	struct thread *td;
 	struct wg_socket *so;
 	int rc;
 
 	so = &sc->sc_socket;
-	so->so_port = port;
 	td = curthread;
 	rc = socreate(AF_INET, &so->so_so4, SOCK_DGRAM, IPPROTO_UDP, td->td_ucred, td);
-	MPASS(rc == 0);
+	if (rc)
+		return (rc);
 	rc = udp_set_kernel_tunneling(so->so_so4, wg_input, NULL, sc);
+	/*
+	 * udp_set_kernel_tunneling can only fail if there is already a tunneling function set.
+	 * This should never happen with a new socket.
+	 */
 	MPASS(rc == 0);
 	
-	socreate(AF_INET6, &so->so_so6, SOCK_DGRAM, IPPROTO_UDP, td->td_ucred, td);
-	MPASS(rc == 0);
+	rc = socreate(AF_INET6, &so->so_so6, SOCK_DGRAM, IPPROTO_UDP, td->td_ucred, td);
+	if (rc) {
+		sofree(so->so_so4);
+		return (rc);
+	}
 	rc = udp_set_kernel_tunneling(so->so_so6, wg_input, NULL, sc);
 	MPASS(rc == 0);
 
@@ -479,7 +485,6 @@ wg_socket_bind(struct wg_socket *so)
 
 	if ((rc = sobind(so->so_so4, &laddr.sa, td)) != 0)
 		return (rc);
-
 
 	sin6 = &laddr.in6;
 	sin6->sin6_len = sizeof(laddr.in6);
