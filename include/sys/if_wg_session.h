@@ -103,4 +103,8 @@ struct wg_device_io {
 #define	ENOKEY	ENOTCAPABLE
 #endif
 
+#define WGC_SETCONF	0x1
+#define WGC_GETCONF	0x2
+
+
 #endif /* __IF_WG_H__ */

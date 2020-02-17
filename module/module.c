@@ -38,6 +38,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/module.h>
 #include <sys/proc.h>
 #include <sys/socket.h>
+#include <sys/sockio.h>
 #include <sys/queue.h>
 
 
@@ -69,6 +70,13 @@ MALLOC_DEFINE(M_WG, "WG", "wireguard");
 	IFCAP_VLAN_MTU | IFCAP_TXCSUM_IPV6 | IFCAP_HWCSUM_IPV6 | IFCAP_JUMBO_MTU | IFCAP_LINKSTATE
 
 static int clone_count;
+struct nvlist_header {
+	uint8_t		nvlh_magic;
+	uint8_t		nvlh_version;
+	uint8_t		nvlh_flags;
+	uint64_t	nvlh_descriptors;
+	uint64_t	nvlh_size;
+} __packed;
 
 static int
 wg_cloneattach(if_ctx_t ctx, struct if_clone *ifc, const char *name, caddr_t params)
@@ -206,6 +214,96 @@ wg_stop(if_ctx_t ctx)
 	//wg_socket_reinit(sc, NULL, NULL);
 }
 
+static int
+wg_getconf(struct wg_softc *sc, struct ifdrv *ifd)
+{
+	nvlist_t *nvl;
+	int err, size;
+
+	nvl = nvlist_create(0);
+	if (nvl == NULL)
+		return (ENOMEM);
+	err = 0;
+	nvlist_add_number(nvl, "listen-port", sc->sc_socket.so_port);
+	nvlist_add_binary(nvl, "public-key", sc->sc_local.l_public, WG_KEY_SIZE);
+	nvlist_add_binary(nvl, "private-key", sc->sc_local.l_private, WG_KEY_SIZE);
+	size = nvlist_size(nvl);
+	if (ifd->ifd_len == 0) {
+		ifd->ifd_len = size;
+		goto out;
+	}
+	if (ifd->ifd_len < size) {
+		err = ENOSPC;
+		goto out;
+	}
+	if (ifd->ifd_data == NULL) {
+		err = EFAULT;
+		goto out;
+	}
+	err = copyout(nvl, ifd->ifd_data, size);
+	ifd->ifd_len = size;
+out:
+	nvlist_destroy(nvl);
+	return (err);
+}
+
+static int
+wg_setconf(struct wg_softc *sc, struct ifdrv *ifd)
+{
+	int err;
+	nvlist_t *nvl;
+
+	if (ifd->ifd_len == 0 || ifd->ifd_data == NULL)
+		return (EFAULT);
+	if (ifd->ifd_len < sizeof(struct nvlist_header))
+		return (EINVAL);
+	nvl = malloc(ifd->ifd_len, M_NVLIST, M_WAITOK);
+	if (nvlist_size(nvl) != ifd->ifd_len) {
+		err = EBADMSG;
+		goto out;
+	}
+	err = copyin(ifd->ifd_data, nvl, ifd->ifd_len);
+	if (err)
+		goto out;
+	if (nvlist_exists_number(nvl, "listen-port")) {
+
+	}
+	if (nvlist_exists_binary(nvl, "private-key")) {
+
+	}
+	if (nvlist_exists_binary(nvl, "public-key")) {
+
+	}
+ out:
+	free(nvl, M_NVLIST);
+	return (err);
+}
+
+static int
+wg_priv_ioctl(if_ctx_t ctx, u_long command, caddr_t data)
+{
+	struct wg_softc *sc = iflib_get_softc(ctx);
+	struct ifdrv *ifd = (struct ifdrv *)data;
+	int ifd_cmd;
+
+	switch (command) {
+		case SIOCGDRVSPEC:
+		case SIOCSDRVSPEC:
+			ifd_cmd = ifd->ifd_cmd;
+			break;
+		default:
+			return (EINVAL);
+	}
+	switch (ifd_cmd) {
+		case WGC_GETCONF:
+			return (wg_getconf(sc, ifd));
+			break;
+		case WGC_SETCONF:
+			return (wg_setconf(sc, ifd));
+			break;
+	}
+	return (ENOTSUP);
+}
 
 static device_method_t wg_if_methods[] = {
 	DEVMETHOD(ifdi_cloneattach, wg_cloneattach),
@@ -213,6 +311,7 @@ static device_method_t wg_if_methods[] = {
 	DEVMETHOD(ifdi_detach, wg_detach),
 	DEVMETHOD(ifdi_init, wg_init),
 	DEVMETHOD(ifdi_stop, wg_stop),
+	DEVMETHOD(ifdi_priv_ioctl, wg_priv_ioctl),
 	DEVMETHOD_END
 };
 
