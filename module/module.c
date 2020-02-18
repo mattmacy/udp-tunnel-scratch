@@ -70,20 +70,37 @@ MALLOC_DEFINE(M_WG, "WG", "wireguard");
 	IFCAP_VLAN_MTU | IFCAP_TXCSUM_IPV6 | IFCAP_HWCSUM_IPV6 | IFCAP_JUMBO_MTU | IFCAP_LINKSTATE
 
 static int clone_count;
-struct nvlist_header {
-	uint8_t		nvlh_magic;
-	uint8_t		nvlh_version;
-	uint8_t		nvlh_flags;
-	uint64_t	nvlh_descriptors;
-	uint64_t	nvlh_size;
-} __packed;
+
+struct nvlist_desc {
+	caddr_t nd_data;
+	u_long nd_len;
+};
 
 static int
 wg_cloneattach(if_ctx_t ctx, struct if_clone *ifc, const char *name, caddr_t params)
 {
 	struct wg_softc *wg = iflib_get_softc(ctx);
 	if_softc_ctx_t scctx;
+	struct nvlist_desc nd;
+	nvlist_t *nvl;
+	void *packed;
+	int size, err;
 
+	err = 0;
+	if (copyin(params, &nd, sizeof(nd)))
+		return (EFAULT);
+	/* check that this is reasonable */
+	size = nd.nd_len;
+	packed = malloc(size, M_TEMP, M_WAITOK);
+	if (copyin(nd.nd_data, packed, size)) {
+		err = EFAULT;
+		goto out;
+	}
+	nvl = nvlist_unpack(packed, size, 0);
+	if (nvl == NULL) {
+		err = EBADMSG;
+		goto out;
+	}
 	atomic_add_int(&clone_count, 1);
 	scctx = wg->shared = iflib_get_softc_ctx(ctx);
 	scctx->isc_capenable = WG_CAPS;
@@ -91,7 +108,9 @@ wg_cloneattach(if_ctx_t ctx, struct if_clone *ifc, const char *name, caddr_t par
 		| CSUM_IP6_UDP | CSUM_IP6_TCP;
 	wg->wg_ctx = ctx;
 	wg->sc_ifp = iflib_get_ifp(ctx);
-	return (0);
+out:
+	free(packed, M_TEMP);
+	return (err);
 }
 
 static int
@@ -259,8 +278,6 @@ wg_setconf(struct wg_softc *sc, struct ifdrv *ifd)
 
 	if (ifd->ifd_len == 0 || ifd->ifd_data == NULL)
 		return (EFAULT);
-	if (ifd->ifd_len < sizeof(struct nvlist_header))
-		return (EINVAL);
 	nvl = malloc(ifd->ifd_len, M_NVLIST, M_WAITOK);
 	if (nvlist_size(nvl) != ifd->ifd_len) {
 		err = EBADMSG;
