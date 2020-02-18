@@ -218,7 +218,9 @@ static int
 wg_getconf(struct wg_softc *sc, struct ifdrv *ifd)
 {
 	nvlist_t *nvl;
-	int err, size;
+	void *packed;
+	size_t size;
+	int err;
 
 	nvl = nvlist_create(0);
 	if (nvl == NULL)
@@ -227,7 +229,9 @@ wg_getconf(struct wg_softc *sc, struct ifdrv *ifd)
 	nvlist_add_number(nvl, "listen-port", sc->sc_socket.so_port);
 	nvlist_add_binary(nvl, "public-key", sc->sc_local.l_public, WG_KEY_SIZE);
 	nvlist_add_binary(nvl, "private-key", sc->sc_local.l_private, WG_KEY_SIZE);
-	size = nvlist_size(nvl);
+	packed = nvlist_pack(nvl, &size);
+	if (packed == NULL)
+		return (ENOMEM);
 	if (ifd->ifd_len == 0) {
 		ifd->ifd_len = size;
 		goto out;
@@ -240,10 +244,10 @@ wg_getconf(struct wg_softc *sc, struct ifdrv *ifd)
 		err = EFAULT;
 		goto out;
 	}
-	err = copyout(nvl, ifd->ifd_data, size);
+	err = copyout(packed, ifd->ifd_data, size);
 	ifd->ifd_len = size;
 out:
-	nvlist_destroy(nvl);
+	free(packed, M_NVLIST);
 	return (err);
 }
 
