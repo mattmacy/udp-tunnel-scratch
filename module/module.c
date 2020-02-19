@@ -79,35 +79,70 @@ struct nvlist_desc {
 static int
 wg_cloneattach(if_ctx_t ctx, struct if_clone *ifc, const char *name, caddr_t params)
 {
-	struct wg_softc *wg = iflib_get_softc(ctx);
+	struct wg_softc *sc = iflib_get_softc(ctx);
 	if_softc_ctx_t scctx;
-	struct nvlist_desc nd;
+	device_t dev;
+	struct iovec iov;
 	nvlist_t *nvl;
 	void *packed;
 	int size, err;
+	uint16_t listen_port;
+	const void *priv_key, *pub_key;
+	size_t priv_size, pub_size;
 
 	err = 0;
-	if (copyin(params, &nd, sizeof(nd)))
+	if (copyin(params, &iov, sizeof(iov)))
 		return (EFAULT);
 	/* check that this is reasonable */
-	size = nd.nd_len;
+	size = iov.iov_len;
 	packed = malloc(size, M_TEMP, M_WAITOK);
-	if (copyin(nd.nd_data, packed, size)) {
+	if (copyin(iov.iov_base, packed, size)) {
 		err = EFAULT;
 		goto out;
 	}
+	dev = iflib_get_dev(ctx);
 	nvl = nvlist_unpack(packed, size, 0);
 	if (nvl == NULL) {
+		device_printf(dev, "%s nvlist_unpack failed\n", __func__);
 		err = EBADMSG;
 		goto out;
 	}
+	if (!nvlist_exists_number(nvl, "listen-port")) {
+		device_printf(dev, "%s listen-port not set\n", __func__);
+		err = EBADMSG;
+		goto nvl_out;
+	}
+	listen_port = nvlist_get_number(nvl, "listen-port");
+
+	if (!nvlist_exists_binary(nvl, "private-key")) {
+		device_printf(dev, "%s private-key not set\n", __func__);
+		err = EBADMSG;
+		goto nvl_out;
+	}
+	priv_key = nvlist_get_binary(nvl, "private-key", &priv_size);
+
+	if (!nvlist_exists_number(nvl, "public-key")) {
+		device_printf(dev, "%s public-key not set\n", __func__);
+		err = EBADMSG;
+		goto nvl_out;
+	}
+	pub_key = nvlist_get_binary(nvl, "public-key", &pub_size);
+
+
+	sc->sc_socket.so_port = listen_port;
+	memcpy(sc->sc_local.l_private, priv_key, priv_size);
+	memcpy(sc->sc_local.l_public, pub_key, pub_size);
+
 	atomic_add_int(&clone_count, 1);
-	scctx = wg->shared = iflib_get_softc_ctx(ctx);
+	scctx = sc->shared = iflib_get_softc_ctx(ctx);
 	scctx->isc_capenable = WG_CAPS;
 	scctx->isc_tx_csum_flags = CSUM_TCP | CSUM_UDP | CSUM_TSO | CSUM_IP6_TCP \
 		| CSUM_IP6_UDP | CSUM_IP6_TCP;
-	wg->wg_ctx = ctx;
-	wg->sc_ifp = iflib_get_ifp(ctx);
+	sc->wg_ctx = ctx;
+	sc->sc_ifp = iflib_get_ifp(ctx);
+
+nvl_out:
+	nvlist_destroy(nvl);
 out:
 	free(packed, M_TEMP);
 	return (err);
