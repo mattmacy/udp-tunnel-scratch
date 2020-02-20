@@ -121,7 +121,7 @@ wg_cloneattach(if_ctx_t ctx, struct if_clone *ifc, const char *name, caddr_t par
 	}
 	priv_key = nvlist_get_binary(nvl, "private-key", &priv_size);
 
-	if (!nvlist_exists_number(nvl, "public-key")) {
+	if (!nvlist_exists_binary(nvl, "public-key")) {
 		device_printf(dev, "%s public-key not set\n", __func__);
 		err = EBADMSG;
 		goto nvl_out;
