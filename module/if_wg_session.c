@@ -436,10 +436,19 @@ wg_socket_init(struct wg_softc *sc)
 
 
 void
-wg_socket_reinit(struct wg_softc *wg, struct socket *new4,
+wg_socket_reinit(struct wg_softc *sc, struct socket *new4,
     struct socket *new6)
 {
-	UNIMPLEMENTED();
+	struct wg_socket *so;
+
+	so = &sc->sc_socket;
+
+	if (so->so_so4)
+		sofree(so->so_so4);
+	so->so_so4 = new4;
+	if (so->so_so6)
+		sofree(so->so_so6);
+	so->so_so6 = new6;
 }
 
 void
