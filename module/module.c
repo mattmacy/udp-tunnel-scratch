@@ -87,8 +87,8 @@ wg_cloneattach(if_ctx_t ctx, struct if_clone *ifc, const char *name, caddr_t par
 	void *packed;
 	int size, err;
 	uint16_t listen_port;
-	const void *priv_key, *pub_key;
-	size_t priv_size, pub_size;
+	const void *priv_key;
+	size_t priv_size;
 
 	err = 0;
 	if (copyin(params, &iov, sizeof(iov)))
@@ -120,18 +120,16 @@ wg_cloneattach(if_ctx_t ctx, struct if_clone *ifc, const char *name, caddr_t par
 		goto nvl_out;
 	}
 	priv_key = nvlist_get_binary(nvl, "private-key", &priv_size);
-
-	if (!nvlist_exists_binary(nvl, "public-key")) {
-		device_printf(dev, "%s public-key not set\n", __func__);
+	if (priv_size != CURVE25519_KEY_SIZE) {
+		device_printf(dev, "%s bad length for private-key %zu\n", __func__, priv_size);
 		err = EBADMSG;
 		goto nvl_out;
 	}
-	pub_key = nvlist_get_binary(nvl, "public-key", &pub_size);
-
 
 	sc->sc_socket.so_port = listen_port;
 	memcpy(sc->sc_local.l_private, priv_key, priv_size);
-	memcpy(sc->sc_local.l_public, pub_key, pub_size);
+	curve25519_clamp_secret(sc->sc_local.l_private);
+	curve25519_generate_public(sc->sc_local.l_public, priv_key);
 
 	atomic_add_int(&clone_count, 1);
 	scctx = sc->shared = iflib_get_softc_ctx(ctx);
