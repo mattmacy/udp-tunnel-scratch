@@ -307,18 +307,21 @@ static int
 wg_setconf(struct wg_softc *sc, struct ifdrv *ifd)
 {
 	int err;
+	void *nvlpacked;
 	nvlist_t *nvl;
 
 	if (ifd->ifd_len == 0 || ifd->ifd_data == NULL)
 		return (EFAULT);
-	nvl = malloc(ifd->ifd_len, M_NVLIST, M_WAITOK);
-	if (nvlist_size(nvl) != ifd->ifd_len) {
+	nvlpacked = malloc(ifd->ifd_len, M_TEMP, M_WAITOK);
+
+	err = copyin(ifd->ifd_data, nvlpacked, ifd->ifd_len);
+	if (err)
+		goto out;
+	nvl = nvlist_unpack(nvlpacked, ifd->ifd_len, 0);
+	if (nvl == NULL) {
 		err = EBADMSG;
 		goto out;
 	}
-	err = copyin(ifd->ifd_data, nvl, ifd->ifd_len);
-	if (err)
-		goto out;
 	if (nvlist_exists_number(nvl, "listen-port")) {
 
 	}
@@ -329,7 +332,7 @@ wg_setconf(struct wg_softc *sc, struct ifdrv *ifd)
 
 	}
  out:
-	free(nvl, M_NVLIST);
+	free(nvlpacked, M_TEMP);
 	return (err);
 }
 
